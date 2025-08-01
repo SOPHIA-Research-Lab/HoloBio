@@ -1,3 +1,4 @@
+
 import zipfile, io
 import customtkinter as ctk
 from parallel_rc import *
@@ -189,16 +190,62 @@ class App(ctk.CTk):
         return ["Init Camera", "Load Video"]
 
     def _on_load_select(self, choice: str) -> None:
-        """Dispatch the three options from the new Load menu."""
+        """Dispatch the two options from the Load menu."""
+        self._reset_source()  # <- 🔴 SIEMPRE detener cualquier cosa activa
+
         if choice == "Init Camera":
             self._init_camera()
             if self.cap and self.cap.isOpened():
+                print("[DEBUG] Calling start_preview_stream")
                 self.start_preview_stream()
+
         elif choice == "Load Video":
             self.load_video()
-        self.load_menu.set("Load")
 
+        self.load_menu.set("Load")
         self.after(200, lambda: self.load_menu.set("Load"))
+
+    def _reset_source(self) -> None:
+        """Stops any running camera/video and clears cache/memory."""
+        print("[DEBUG] Resetting sources (camera/video)")
+
+        self.preview_active = False
+        self.video_playing = False
+        self.realtime_active = False
+
+        # Cancel any video loop
+        if hasattr(self, "_video_loop_id"):
+            self.after_cancel(self._video_loop_id)
+            del self._video_loop_id
+
+        # Cancel background thread
+        if hasattr(self, "play_thread") and self.play_thread is not None:
+            if self.play_thread.is_alive():
+                print("[DEBUG] Joining active play_thread...")
+                self.play_thread.join(timeout=1.0)
+            self.play_thread = None
+
+        # Cancel compensation worker
+        if hasattr(self, "_stop_compensation"):
+            self._stop_compensation.set()
+
+        # Release any video/camera
+        if hasattr(self, "cap") and self.cap is not None:
+            print("[DEBUG] Releasing cap")
+            self.cap.release()
+            self.cap = None
+
+        # Clean frame buffers
+        self.hologram_frames.clear()
+        self.ft_frames.clear()
+        self.multi_holo_arrays.clear()
+        self.multi_ft_arrays.clear()
+        self.phase_arrays.clear()
+        self.amplitude_arrays.clear()
+        self.current_holo_array = None
+        self.current_ft_array = None
+        self.current_phase_array = None
+        self.current_amplitude_array = None
 
     def pause_visualization(self) -> None:
         """Pauses the current preview (camera or video) *without* closing it."""
