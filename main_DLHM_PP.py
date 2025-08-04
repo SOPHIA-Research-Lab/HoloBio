@@ -248,7 +248,6 @@ class App(ctk.CTk):
             if m is not None:
                 m.set(caption)
 
-
     def _show_popup_image(self, arr: np.ndarray, title: str = "Speckle filtered"):
      """Show a static image in a non‑blocking Toplevel window."""
      win = tk.Toplevel(self)
@@ -258,7 +257,6 @@ class App(ctk.CTk):
      lbl = tk.Label(win, image=tk_img)
      lbl.image = tk_img
      lbl.pack()
-
 
     def _init_data_containers(self) -> None:
         """
@@ -300,7 +298,6 @@ class App(ctk.CTk):
         self.filtered_amp_array = None
         self.filtered_phase_array = None
 
-
     def _map_ui_to_mpl_cmap(self, ui_name: str) -> str:
         """Translate the UI name into a valid Matplotlib identifier."""
         table = {
@@ -315,7 +312,6 @@ class App(ctk.CTk):
         }
         return table.get(ui_name, ui_name.lower())
 
-
     def _apply_ui_colormap(self, arr8u: np.ndarray, ui_name: str) -> np.ndarray:
         """
         Return *arr8u* converted to RGB with the UI-selected colormap.
@@ -329,7 +325,6 @@ class App(ctk.CTk):
         rgb = (cmap(norm)[..., :3] * 255).astype(np.uint8)
         return rgb
 
-
     def _safe_apply_matplotlib_colormap(self,arr8u : np.ndarray,ui_name: str):
         """
         Drop-in replacement for the old helper.
@@ -342,7 +337,6 @@ class App(ctk.CTk):
 
         from PIL import Image
         return Image.fromarray(rgb.astype(np.uint8), mode="RGB")
-
 
     def _add_amplitude_filter_vars(self) -> None:
         """
@@ -367,7 +361,6 @@ class App(ctk.CTk):
         self.highpass_a = self.highpass_r
         self.lowpass_a = self.lowpass_r
 
-
     def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ctk.CTkImage:
         """Return a CTkImage letterboxed to (viewbox_width, viewbox_height)."""
         max_w, max_h = self.viewbox_width, self.viewbox_height
@@ -390,7 +383,6 @@ class App(ctk.CTk):
         # Return as CTkImage with the exact desired size
         return ctk.CTkImage(light_image=final_img, size=(max_w, max_h))
     
-
     def init_all_frames(self) -> None:
         self.apply_dimensions = lambda: tGUI.apply_dimensions(self)
         self.apply_QPI = lambda: tGUI.apply_QPI(self)
@@ -448,7 +440,6 @@ class App(ctk.CTk):
             add_structure_quantification_callback=self.apply_microstructure
         )
  
-
     def on_filters_dimensions_change(self, *_):
 
         new_dim = self.filters_dimensions_var.get()
@@ -477,7 +468,6 @@ class App(ctk.CTk):
         self._recompute_and_show(left=(new_dim == 0), right=(new_dim != 0))
         self._last_filters_dimension = new_dim
 
-
     def _current_speckle_method(self) -> int | None:
         """Return the index (0-3) of the active speckle check-box, or None."""
         if not hasattr(self, "spk_vars"):
@@ -486,7 +476,6 @@ class App(ctk.CTk):
             if var.get():
                 return i
         return None
-
 
     def _refresh_after_speckle(self) -> None:
         """Swap in/out filtered arrays and repaint the right viewer."""
@@ -525,12 +514,10 @@ class App(ctk.CTk):
 
         self.update_right_view()
 
-
     def _apply_live_speckle_if_active(self) -> None:
         if not self.speckle_applied:
             return
         self._refresh_after_speckle()
-
 
     def _apply_speckle_filter(self) -> None:
         """Called by the ‘Apply’ button in the Speckle pane."""
@@ -546,7 +533,6 @@ class App(ctk.CTk):
         self.speckle_applied = True
         self._refresh_after_speckle()
 
-
     def update_qpi_placeholder(self) -> None:
         """
         Enable or disable input fields based on the selected QPI mode:
@@ -554,7 +540,6 @@ class App(ctk.CTk):
         - Otherwise (Index mode): enable index fields, disable thickness input.
         """
         mode = self.option_meas_var.get()
-
 
     def init_viewing_frame(self) -> None:
         """
@@ -574,7 +559,6 @@ class App(ctk.CTk):
         fGUI.build_toolbar(self)
         fGUI.build_two_views_panel(self)
 
-
     def _ensure_frame_lists_length(self) -> None:
         def _pad(lst, target_len):
             dummy = ctk.CTkImage(light_image=Image.new("RGB", (1, 1)),
@@ -587,17 +571,14 @@ class App(ctk.CTk):
         _pad(self.phase_frames,      len(self.phase_arrays))
         _pad(self.intensity_frames,  len(self.intensity_arrays))
 
-
     def get_load_menu_values(self):
         return ["Load image", "Select reference", "Reset reference"]
 
-    
     def _on_load_select(self, choice: str):
         {"Load image":       self.selectfile,
          "Select reference": self.selectref,
          "Reset reference":  self.resetref}.get(choice, lambda: None)()
         self.after(100, self._reset_toolbar_labels)
-
 
     def _on_tools_select(self, choice: str):
         if choice == "Filters":
@@ -610,18 +591,15 @@ class App(ctk.CTk):
             self.change_menu_to("bio")
         self.after(100, self._reset_toolbar_labels)
   
-
     def _on_save_select(self, choice: str):
         {"Save FT":        self.save_capture,
          "Save Phase":     self.save_processed,
          "Save Amplitude": self.save_processed}.get(choice, lambda: None)()
         self.after(100, self._reset_toolbar_labels) 
 
-
     def _on_theme_select(self, mode: str):
         ctk.set_appearance_mode(mode)
         self._sync_canvas_and_frame_bg()
-
 
     def _compute_ft(self, arr: np.ndarray) -> np.ndarray:
         """Returns log-magnitude FT (uint8) of *arr*."""
@@ -629,7 +607,6 @@ class App(ctk.CTk):
         mag = np.log1p(np.abs(f))
         mag = (mag / mag.max() * 255).astype(np.uint8)
         return mag
-
 
     def update_left_view(self):
         """
@@ -650,7 +627,6 @@ class App(ctk.CTk):
         self.img_c = self._preserve_aspect_ratio_right(pil)
         self.captured_label.configure(image=self.img_c)
         self.captured_title_label.configure(text=title)
-
 
     def _get_current_array(self, what: str) -> np.ndarray | None:
         """
@@ -674,22 +650,17 @@ class App(ctk.CTk):
                 return self.amplitude_arrays[self.current_amp_index]
         return None 
 
-
     def zoom_holo_view(self, *args, **kwargs):
         tGUI.zoom_holo_view(self, *args, **kwargs)
-
 
     def zoom_recon_view(self, *args, **kwargs):
         tGUI.zoom_recon_view(self, *args, **kwargs)
 
-
     def _open_zoom_view(self, *args, **kwargs):
         tGUI._open_zoom_view(self, *args, **kwargs)
 
-
     def _refresh_zoom_view(self, *args, **kwargs):
         tGUI._refresh_zoom_view(self, *args, **kwargs)
-
 
     def _show_ft_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
@@ -702,7 +673,6 @@ class App(ctk.CTk):
             )
         menu.tk_popup(self.ft_mode_button.winfo_rootx(),
                       self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
-
 
     def update_right_view(self):
         view_name = self.recon_view_var.get().strip()
@@ -725,10 +695,8 @@ class App(ctk.CTk):
         self.processed_label.configure(image=self.img_r)
         self.processed_title_label.configure(text=view_name)
 
-
     def _on_ft_mode_changed(self):
         self._refresh_all_ft_views()
-
 
     def _show_amp_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
@@ -741,11 +709,9 @@ class App(ctk.CTk):
         menu.tk_popup(self.amp_mode_button.winfo_rootx(),
                    self.amp_mode_button.winfo_rooty()+self.amp_mode_button.winfo_height())
  
-
     def _on_amp_mode_changed(self, *_):
         if self.recon_view_var.get().startswith("Amplitude"):
             self.update_right_view()
-
 
     def _generate_ft_display(self, holo_array: np.ndarray, log_scale: bool = True) -> np.ndarray:
         ft_cplx = np.fft.fftshift(np.fft.fft2(holo_array.astype(np.float32)))
@@ -755,13 +721,11 @@ class App(ctk.CTk):
         mag = mag / (mag.max() + 1e-9) * 255.0
         return mag.astype(np.uint8)
 
-
     def _generate_intensity_display(self, amp_array_8bit: np.ndarray) -> np.ndarray:
         amp_f = amp_array_8bit.astype(np.float32) / 255.0
         intens = amp_f ** 2
         intens = intens / (intens.max() + 1e-9) * 255.0
         return intens.astype(np.uint8)
-
 
     def previous_hologram_view(self):
         """Show the previous hologram and restore its filter UI state."""
@@ -776,7 +740,6 @@ class App(ctk.CTk):
         self.load_ui_from_filter_state(0, self.current_left_index)
         self.update_image_filters()
 
-
     def next_hologram_view(self):
         """Show the next hologram and restore its filter UI state."""
         if not getattr(self, "multi_holo_arrays", []):
@@ -790,7 +753,6 @@ class App(ctk.CTk):
         self.load_ui_from_filter_state(0, self.current_left_index)
         self.update_image_filters()
      
-
     def _place_holo_arrows(self) -> None:
         """Ensure arrows are gridded in row-4 if they were removed."""
         self.left_arrow_holo.grid(row=4, column=0, sticky="w",
@@ -798,17 +760,14 @@ class App(ctk.CTk):
         self.right_arrow_holo.grid(row=4, column=1, sticky="e",
                                    padx=20, pady=5)
 
-
     def show_holo_arrows(self) -> None:
         """Show the navigation arrows when >1 hologram is loaded."""
         self._place_holo_arrows()          # put them in the grid
-
 
     def hide_holo_arrows(self) -> None:
         """Hide the navigation arrows."""
         self.left_arrow_holo.grid_remove()
         self.right_arrow_holo.grid_remove()
-
 
     def _activate_ft_coordinate_display(self) -> None:
         """Bind mouse-motion to the FT image and show the label."""
@@ -819,18 +778,15 @@ class App(ctk.CTk):
         # top-left corner of *left_frame* with a small margin
         self.ft_coord_label.place(relx=0.5, rely=1.0, x=0, y=-8, anchor="s")
 
-
     def _deactivate_ft_coordinate_display(self) -> None:
         """Remove bindings and hide the label when FT is not shown."""
         self.captured_label.unbind("<Motion>")
         self.captured_label.unbind("<Leave>")
         self.ft_coord_label.place_forget()
 
-
     def _refresh_all_ft_views(self):
         if self.holo_view_var.get() == "Fourier Transform":
             self.update_left_view()
-
 
     def _hide_parameters_nav_button(self) -> None:
         if hasattr(self, "param_button"):
@@ -864,7 +820,6 @@ class App(ctk.CTk):
 
         btn.bind("<Button-1>", _on_click)
 
-
     def _set_unit_in_label(self, lbl: ctk.CTkLabel, unit: str) -> None:
         base = lbl.cget("text").split("(")[0].strip()
         lbl.configure(text=f"{base} ({unit})")
@@ -875,7 +830,6 @@ class App(ctk.CTk):
         elif "Distance" in base or base.endswith("(L)") \
              or base.endswith("(Z)") or base.endswith("(r)"):
             self.distance_unit = unit
-
 
     def get_value_in_micrometers(self, value: str, unit: str) -> float:
         """Converts *value* (given in *unit*) into micrometres (µm)."""
@@ -896,7 +850,6 @@ class App(ctk.CTk):
         except ValueError:
             raise ValueError(f"Cannot convert “{value}” into float.")
         return val_f * conversion.get(unit, 1.0)
-
 
     def _setup_unit_buttons(self) -> None:
         if not hasattr(self, "wavelength_unit"):
@@ -921,7 +874,6 @@ class App(ctk.CTk):
                                unit_var=self._dist_unit_var,
                                label_target=self.L_slider_title)
 
-
     def _init_colormap_settings(self):
         """Centralise all colour-map related state."""
         self.available_colormaps = [
@@ -936,7 +888,6 @@ class App(ctk.CTk):
         self._active_cmap_amp = "Original"
         self._active_cmap_phase = "Original"
 
-
     def show_filters_menu(self):
         if hasattr(self, "filters_choice_menu") and self.filters_choice_menu.winfo_ismapped():
             self.filters_choice_menu.grid_forget()
@@ -949,10 +900,8 @@ class App(ctk.CTk):
         )
         self.filters_choice_menu.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
-
     def choose_filters_menu(self, selection: str):
      self.change_menu_to("bio" if selection == "Bio-Analysis" else "filters")
-
 
     def show_load_options(self):
         """Creates an OptionMenu with two choices: select reference or reset reference."""
@@ -968,7 +917,6 @@ class App(ctk.CTk):
         # place it in the same row to the right of the Load button
         self.load_options_menu.grid(row=0, column=0, padx=5, pady=5,sticky='ew')
 
-
     def choose_load_option(self, selected_option):
         """Callback for the Load OptionMenu."""
         if selected_option == "Load image":
@@ -977,7 +925,6 @@ class App(ctk.CTk):
             self.selectref()
         elif selected_option == "Reset reference":
             self.resetref()
-
 
     def show_save_options(self):
         """Creates an OptionMenu with two choices: save capture or save reconstruction."""
@@ -992,7 +939,6 @@ class App(ctk.CTk):
         )
         self.save_options_menu.grid(row=0, column=2, padx=5, pady=5,sticky='ew')
 
-
     def choose_save_option(self, selected_option):
         """Callback for the Save OptionMenu."""
         if selected_option == "Save capture":
@@ -1000,20 +946,17 @@ class App(ctk.CTk):
         elif selected_option == "Save reconstruction":
             self.save_processed()
     
-
     def toggle_tools(self):
         if self.tools_frame.winfo_ismapped():
           self.tools_frame.grid_remove()
         else:
           self.tools_frame.grid()
 
-
     def toggle_options(self):
         if self.options_frame.winfo_ismapped():
           self.options_frame.grid_remove()
         else:
           self.options_frame.grid()
-
 
     def init_navigation_frame(self) -> None:
         """
@@ -1392,7 +1335,6 @@ class App(ctk.CTk):
                                     pady=(18, 8),
                                     sticky="ew")
 
-
     def _on_compensate(self) -> None:
      """Triggered by the *Compensate* button."""
      # 0 ▏make sure a worker is alive ------------------------------------------
@@ -1449,7 +1391,6 @@ class App(ctk.CTk):
      self.update_right_view()
      self.need_recon = False
  
-
     def _distance_unit_update(self, _lbl, unit: str) -> None:
         # keep a reference for later automatic updates
         self.dist_label = _lbl
@@ -1459,7 +1400,6 @@ class App(ctk.CTk):
 
         # update every caption / placeholder in the UI
         self._on_distance_unit_change(unit)
-
 
     def _reset_all_images(self) -> None:
         """Forget every capture/reconstruction currently stored."""
@@ -1491,7 +1431,6 @@ class App(ctk.CTk):
         self.arr_r_orig = np.zeros((1, 1), dtype=np.uint8)
 
         self.hide_holo_arrows()
-
 
     def _sync_filter_state_from_ui(self) -> None:
         """
@@ -1532,7 +1471,6 @@ class App(ctk.CTk):
             # If that filter is active, refresh its numeric value
             if manual_var.get() and slider is not None:
                 handler(slider.get())
-
 
     def _update_recon_arrays(self,
                              amp_arr:   np.ndarray | None = None,
@@ -1597,7 +1535,6 @@ class App(ctk.CTk):
 
         self._apply_live_speckle_if_active()   # keep speckle preview live
 
-
     def _remove_legacy_show_checkboxes(self):
         """Hide the old ‘Show Intensity’ and ‘Show Phase’ tick-boxes."""
         for widget in (
@@ -1606,7 +1543,6 @@ class App(ctk.CTk):
         ):
             if widget is not None:
                 widget.grid_remove()
-
 
     def _unit_factor(self, unit: str) -> float:
         """Return how many µm correspond to *1 unit*."""
@@ -1618,7 +1554,6 @@ class App(ctk.CTk):
             "m" : 1e6,
             "in": 2.54e4,
         }.get(unit, 1.0)
-
 
     def _convert_dist_selector(self) -> None:
         if not hasattr(self, "dist_dummy_entry"):
@@ -1636,13 +1571,11 @@ class App(ctk.CTk):
         )
         self._distance_unit_menu.grid(row=0, column=0, sticky="ew")
 
-
     def _on_distance_unit_change(self, new_unit: str) -> None:
         """Triggered by the ▼ in ‘Distances’. Refresh everything."""
         self.distance_unit = new_unit
         self._dist_unit_var.set(new_unit)      # keep StringVar in-sync
         self._refresh_distance_unit_labels()   # redraw captions
-
 
     def _refresh_distance_unit_labels(self) -> None:
         u = self.distance_unit
@@ -1683,7 +1616,6 @@ class App(ctk.CTk):
 
         # Force the per-slider numeric update as well
         self.update_parameters()
-
 
     def _run_filters_pipeline(self, img: np.ndarray,
                               use_left_side: bool) -> np.ndarray:
@@ -1741,7 +1673,6 @@ class App(ctk.CTk):
             out = np.clip(out - low + 0.5, 0.0, 1.0)
 
         return (out * 255).astype(np.uint8)
-
 
     def _recompute_and_show(self, left: bool = False, right: bool = False):
         """Build *display* images from pristine copies + checked filters."""
@@ -1846,7 +1777,6 @@ class App(ctk.CTk):
             state["highpass_on"], state["lowpass_on"],
             state["adapt_eq_on"], state.get("speckle_on", False)
         ))
-
 
     def _apply_filters_from_state(self, arr: np.ndarray, st: dict) -> np.ndarray:
         """
@@ -2043,7 +1973,6 @@ class App(ctk.CTk):
         else:  # all distances share the same selector
             self.distance_unit = unit
     
-
     def _ensure_reconstruction_worker(self) -> None:
      """
      If the reconstruction process crashed (e.g. ZeroDivision in propagate),
@@ -2103,8 +2032,6 @@ class App(ctk.CTk):
          except Exception:
              print("Invalid pixel pitch ignored → keeping previous value.")
  
-
-
     def update_image_filters(self):
         """
         Refreshes all check-boxes and sliders so they always show the
@@ -2476,7 +2403,6 @@ class App(ctk.CTk):
         MainMenu = getattr(main_mod, "MainMenu")
         MainMenu().mainloop()
 
-
     def _require_new_compensation(self, *_):
      """
      Any change that invalidates the current reconstruction (for instance,
@@ -2486,7 +2412,6 @@ class App(ctk.CTk):
      """
      self.need_recon = True
      #self._show_waiting_for_compensate()
- 
  
     def _show_waiting_for_compensate(self):
      """
@@ -2558,8 +2483,6 @@ class App(ctk.CTk):
  
      self.hide_holo_arrows()
 
-
-
     def selectref(self):
         self.ref_path = ctk.filedialog.askopenfilename(title='Select an image file')
 
@@ -2619,7 +2542,6 @@ class App(ctk.CTk):
         self.w_fps = fps or getattr(self, "w_fps", 0)
         self._draw_after_id = self.after(50, self.draw)
 
-
     def check_current_FC(self):
         self.FC = filtcosenoF(self.cosine_period, np.array((self.width, self.height)))
         plt.imshow(self.FC, cmap='gray')
@@ -2642,4 +2564,3 @@ if __name__=='__main__':
     app.mainloop()
     app.release()
 
-# # End of main_DLHM_PP.py
