@@ -885,9 +885,9 @@ class App(ctk.CTk):
         self.hologram_frames = [tk_holo]
 
         # show hologram by default
-        self.arr_hologram       = arr_gray
+        self.arr_hologram = arr_gray
         self.current_holo_array = arr_gray
-        self.current_ft_array   = ft_disp
+        self.current_ft_array = ft_disp
         self.captured_label.configure(image=tk_holo)
         self.captured_title_label.configure(text="Hologram")
         self.hide_holo_arrows()
@@ -1567,7 +1567,13 @@ class App(ctk.CTk):
         self.compensation_source = "ps"
         method_idx = self.VShif.get()
 
-        # Convert GUI parameters to micrometers
+        if not hasattr(self, 'phase_shift_imgs') or len(self.phase_shift_imgs) == 0:
+            messagebox.showinfo(
+                "Information",
+                "No holograms are currently loaded. Please load valid holograms before applying phase shifting."
+            )
+            return
+
         try:
             w_val = self.get_value_in_micrometers(self.wave_entry_ps.get(), self.wavelength_unit)
         except:
@@ -1589,13 +1595,6 @@ class App(ctk.CTk):
                 "Information",
                 "Reconstruction parameters (wavelength and pixel size) cannot be zero. Please verify them beore proceeding."
             )
-
-        if not hasattr(self, 'phase_shift_imgs') or len(self.phase_shift_imgs) == 0:
-            messagebox.showinfo(
-                "Information",
-                "No phase-shifting holograms loaded. Please click 'Load Images' first."
-            )
-            return
 
         self._cache_compensation_params(w_val, px_val, py_val)
         self.reset_reconstruction_data()
@@ -2333,17 +2332,21 @@ class App(ctk.CTk):
                     z_best_obj = z_best / (M ** 2)
 
                     def plot_in_main_thread():
-                        plt.figure(figsize=(10, 6))
-                        plt.plot(z_vals_obj, scores, 'b-', linewidth=2, label=metric_fn._name_)
-                        plt.axvline(z_best_obj, color='r', linestyle='--',
-                                    label=f'Optimal Distance = {z_best_obj:.2f} µm')
-                        plt.xlabel('Propagation Distance (µm)')
-                        plt.ylabel('Sharpness Metric')
-                        plt.title(f'Focus Curve – {metric_fn._name_}')
-                        plt.grid(True, alpha=0.3)
-                        plt.legend()
-                        plt.tight_layout()
-                        plt.show()
+                        try:
+                            metric_name = metric_fn.__name__
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(z_vals_obj, scores, 'b-', linewidth=2, label=metric_name)
+                            plt.axvline(z_best_obj, color='r', linestyle='--',
+                                        label=f'Optimal Distance = {z_best_obj:.2f} µm')
+                            plt.xlabel('Propagation Distance (µm)')
+                            plt.ylabel('Sharpness Metric')
+                            plt.title(f'Focus Curve – {metric_name}')
+                            plt.grid(True, alpha=0.3)
+                            plt.legend()
+                            plt.tight_layout()
+                            plt.show()
+                        except Exception as e:
+                            print("[Plot Error]", e)
 
                     if plot_metric:
                         self.after(0, plot_in_main_thread)
@@ -2524,6 +2527,20 @@ class App(ctk.CTk):
 
     def run_phase_compensation(self):
         self.compensation_source = "pc"
+
+        if (
+                not hasattr(self, "arr_hologram") or
+                self.arr_hologram is None or
+                not isinstance(self.arr_hologram, np.ndarray) or
+                self.arr_hologram.size == 0 or
+                np.all(self.arr_hologram == 0)
+        ):
+            messagebox.showinfo(
+                "Warning",
+                "No hologram is currently loaded. Please load a valid hologram before applying phase compensation."
+            )
+            return
+
         try:
             self.wavelength = self.get_value_in_micrometers(self.wave_label_pc_entry.get(), self.wavelength_unit)
         except:
@@ -2545,13 +2562,6 @@ class App(ctk.CTk):
             )
             return
 
-        if self.arr_hologram is None or self.arr_hologram.size == 0:
-            messagebox.showinfo(
-                "Information",
-                "No hologram loaded for phase compensation."
-            )
-            return
-        
         w_val = self.wavelength
         px_val = self.dx
         py_val = self.dy
@@ -2936,7 +2946,7 @@ class App(ctk.CTk):
         self.field_src_frame = ctk.CTkFrame(
             self.numerical_propagation_inner_frame,
             width=PARAMETER_FRAME_WIDTH,
-            height=PARAMETER_FRAME_HEIGHT * 1.5
+            height=PARAMETER_FRAME_HEIGHT
         )
         self.field_src_frame.grid(row=1, column=0, sticky='ew', pady=2)
         self.field_src_frame.grid_propagate(False)
@@ -3096,7 +3106,7 @@ class App(ctk.CTk):
         self.compensation_source = "np"
 
         self.propagate_widgets_np["propagation_apply_button"].configure(
-            command=self._apply_propagation
+            command=self._apply_propagation_np
         )
 
         # final canvas refresh
@@ -3107,45 +3117,68 @@ class App(ctk.CTk):
     def run_numerical_propagation(self):
         source = self.np_source_var.get()
 
-        try:
-            w_val = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)
-        except Exception as e:
-            print(f"[ERROR] Invalid wavelength: {e}")
-            w_val = 0.0
-
-        try:
-            px_val = self.get_value_in_micrometers(self.pitchx_label_np_entry.get(), self.pitch_x_unit)
-        except Exception as e:
-            print(f"[ERROR] Invalid pitch X: {e}")
-            px_val = 0.0
-
-        try:
-            py_val = self.get_value_in_micrometers(self.pitchy_label_np_entry.get(), self.pitch_y_unit)
-        except Exception as e:
-            print(f"[ERROR] Invalid pitch Y: {e}")
-            py_val = 0.0
-
         if source == 0:
             print("[DEBUG] Working with digital hologram")
-            # Add your propagation logic for digital holograms here
-            self._apply_propagation()
+
+            if (
+                    not hasattr(self, "arr_hologram") or
+                    self.arr_hologram is None or
+                    not isinstance(self.arr_hologram, np.ndarray) or
+                    self.arr_hologram.size == 0 or
+                    np.all(self.arr_hologram == 0)
+            ):
+                messagebox.showinfo(
+                    "Warning",
+                    "No hologram is currently loaded. Please load a valid hologram before applying numerical propagation."
+                )
+                return
 
         elif source == 1:
             print("[DEBUG] Working with coherent image")
 
-            # Make sure the image has been loaded
-            if hasattr(self, "coherent_input_image") and self.coherent_input_image is not None:
-                print("[DEBUG] Coherent image detected. Converting to complex field...")
-                self._load_and_display_coherent_image()
-                self._apply_propagation()
-            else:
-                print("[WARNING] No coherent image has been loaded.")
+            if (
+                    not hasattr(self, "coherent_input_image") or
+                    self.coherent_input_image is None or
+                    not isinstance(self.coherent_input_image, np.ndarray) or
+                    self.coherent_input_image.size == 0 or
+                    np.all(self.coherent_input_image == 0)
+            ):
+                messagebox.showinfo(
+                    "Warning",
+                    "No coherent image is currently loaded. Please load a valid image before applying numerical propagation."
+                )
+                return
+
+            self._load_and_display_coherent_image()
+
+        try:
+            w_val = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)
+        except:
+            w_val = 0.0
+
+        try:
+            px_val = self.get_value_in_micrometers(self.pitchx_label_np_entry.get(), self.pitch_x_unit)
+        except:
+            px_val = 0.0
+
+        try:
+            py_val = self.get_value_in_micrometers(self.pitchy_label_np_entry.get(), self.pitch_y_unit)
+        except:
+            py_val = 0.0
+
+        # Check if the parameter have beem defined
+        if w_val == 0.0 or px_val == 0.0 or py_val == 0.0:
+            messagebox.showwarning(
+                "Warning",
+                "Reconstruction parameters (wavelength and pixel size) cannot be zero. Please verify them before proceeding."
+            )
+            return
 
     # Check the radio button options for Numerical Propagation
     def on_np_source_changed(self, *_):
         selected = self.np_source_var.get()
 
-        if selected == 1:  # Coherent Image selected
+        if selected == 1:
             if hasattr(self, "coherent_input_image") and self.coherent_input_image is not None:
                 print("[DEBUG] Coherent Image already loaded – loading and displaying...")
             else:
@@ -3154,7 +3187,6 @@ class App(ctk.CTk):
     # Load and Display for coherent Image
     def _load_and_display_coherent_image(self):
         """Load a coherent image, convert it to complex field, and update both GUI panels."""
-
         field = pyDHM.convert_loaded_image_to_field(self)
 
         if field is None:
