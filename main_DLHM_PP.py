@@ -1335,61 +1335,105 @@ class App(ctk.CTk):
                                     pady=(18, 8),
                                     sticky="ew")
 
+    def _subtract_reference(self, holo_u8: np.ndarray) -> np.ndarray:
+        """
+        Return *holo_u8* (uint8) with the current reference removed.
+
+        Key points
+        ──────────
+        1. Works in float32 with automatic dynamic-range detection (handles
+           8-bit and 16-bit sources alike).
+        2. Fits one multiplicative **gain** on the non-zero portion of the
+           reference (robust to the black side-bars many references have).
+        3. Shifts the whole image so the minimum intensity becomes 0, then
+           rescales so the maximum becomes 1 – prevents the “¼-image” black
+           block you observed.
+        4. Falls back gracefully when no valid reference is selected.
+        """
+        # ─── 0 ▏load reference -------------------------------------------------
+        if not self.ref_path:
+            return holo_u8
+        try:
+            ref_raw = Image.open(self.ref_path)
+            ref_arr = np.asarray(ref_raw.convert("I"))       # keep bit-depth
+        except Exception as exc:
+            print("Reference load failed →", exc)
+            return holo_u8
+        if ref_arr.shape != holo_u8.shape:
+            print("Reference ignored → size mismatch")
+            return holo_u8
+
+        # ─── 1 ▏normalise to 0-1 float32 --------------------------------------
+        def _to_float01(arr: np.ndarray) -> np.ndarray:
+            arr = arr.astype(np.float32)
+            max_val = 65535.0 if arr.max() > 255 else 255.0
+            return arr / max_val
+
+        holo_f = _to_float01(holo_u8)
+        ref_f  = _to_float01(ref_arr)
+
+        # ─── 2 ▏gain on defined reference pixels ------------------------------
+        mask = ref_f > 1e-4                              # skip padding bars
+        if not mask.any():                               # degenerate ref
+            return holo_u8
+        gain = (holo_f[mask] * ref_f[mask]).sum() / \
+               (ref_f[mask]**2).sum()
+
+        # ─── 3 ▏subtract -------------------------------------------------------
+        corr = holo_f - gain * ref_f                     # raw difference
+
+        # ─── 4 ▏global shift & rescale → avoid negative floor artefacts -------
+        corr -= corr.min()                               # min → 0
+        if corr.max() > 0:
+            corr /= corr.max()                           # max → 1
+
+        # ─── 5 ▏back to uint8 --------------------------------------------------
+        return (corr * 255.0).astype(np.uint8)
+
     def _on_compensate(self) -> None:
-     """Triggered by the *Compensate* button."""
-     # 0 ▏make sure a worker is alive ------------------------------------------
-     self._ensure_reconstruction_worker()
+        """Triggered by the *Compensate* button – runs a single reconstruction."""
+        # 0 ▏ensure the worker process is alive
+        self._ensure_reconstruction_worker()
 
-     # 1 ▏fresh parameters ------------------------------------------------------
-     self.set_variables()          # reads wavelength / pitches
-     self.set_value_L()            # reads sliders / entries
-     self.set_value_Z()
-     self.set_value_r()
+        # 1 ▏refresh optical / geometric parameters from the GUI
+        self.set_variables()
+        self.set_value_L()
+        self.set_value_Z()
+        self.set_value_r()
 
-     # 2 ▏sanity checks ---------------------------------------------------------
-     if self.wavelength <= 0 or self.dxy <= 0:
-         from tkinter import messagebox
-         messagebox.showerror(
-             "Missing parameters",
-             "Please enter valid (non–zero) values\nfor Wavelength and Pixel pitch\n"
-             "before pressing *Compensate*."
-         )
-         return 
+        # 2 ▏sanity check
+        if self.wavelength <= 0 or self.dxy <= 0:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Missing parameters",
+                "Please enter valid (non-zero) values for\n"
+                "Wavelength and Pixel pitch before\npressing *Compensate*."
+            )
+            return
 
-     # 3 ▏prepare hologram (reference subtraction) -----------------------------
-     holo = self.arr_c_orig.copy()
-     if self.ref_path:
-         try:
-             ref = np.asarray(Image.open(self.ref_path).convert("L"))
-             #ref = np.asarray(Image.open(self.ref_path))
-             if ref.shape == holo.shape:
-                 holo = holo - ref
-             else:
-                 print("Reference ignored → size mismatch.")
-         except Exception as exc:
-             print("Could not load reference →", exc)
- 
-     # 4 ▏send job to the worker -----------------------------------------------
-     self.arr_c = holo
-     self.update_inputs("reconstruction")
-     self.recon_input["image"] = holo
- 
-     if not self.queue_manager["reconstruction"]["input"].full():
-         self.queue_manager["reconstruction"]["input"].put(self.recon_input)
- 
-     # 5 ▏await result (gracefully handle time‑out) -----------------------------
-     try:
-         out = self.queue_manager["reconstruction"]["output"].get(timeout=3)
-     except Exception as exc:
-         print("Compensate: reconstruction timed‑out →", exc)
-         self.need_recon = True          # still pending
-         return
- 
-     # 6 ▏success → refresh viewers --------------------------------------------
-     self.recon_output = out
-     self._update_recon_arrays()
-     self.update_right_view()
-     self.need_recon = False
+        # 3 ▏prepare hologram (reference subtraction)
+        holo_u8 = self._subtract_reference(self.arr_c_orig.copy())
+
+        # 4 ▏dispatch job to the reconstruction worker
+        self.arr_c = holo_u8
+        self.update_inputs("reconstruction")
+        self.recon_input["image"] = holo_u8
+        if not self.queue_manager["reconstruction"]["input"].full():
+            self.queue_manager["reconstruction"]["input"].put(self.recon_input)
+
+        # 5 ▏await result (time-out handled gracefully)
+        try:
+            out = self.queue_manager["reconstruction"]["output"].get(timeout=3)
+        except Exception as exc:
+            print("Compensate: reconstruction timed-out →", exc)
+            self.need_recon = True          # still pending
+            return
+
+        # 6 ▏success → update viewers
+        self.recon_output = out
+        self._update_recon_arrays()
+        self.update_right_view()
+        self.need_recon = False
  
     def _distance_unit_update(self, _lbl, unit: str) -> None:
         # keep a reference for later automatic updates
