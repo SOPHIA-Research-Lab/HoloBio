@@ -4,7 +4,7 @@ from scipy.optimize import linear_sum_assignment
 import matplotlib.pyplot as plt
 
 def track_particles_kalman(
-    video_path,
+    cap,
     min_area=100,
     max_area=500,
     blob_color=255,
@@ -64,17 +64,16 @@ def track_particles_kalman(
         centroids = np.array([[kp.pt[0], kp.pt[1]] for kp in keypoints], dtype=np.float32)
         return centroids
 
-    cap = cv2.VideoCapture(video_path)
     ret, old_frame = cap.read()
     if not ret:
         raise ValueError("Could not read the first frame of the video.")
 
     old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
-    centros = detectar_centroides(old_gray)
-    if len(centros) == 0:
+    centers = detectar_centroides(old_gray)
+    if len(centers) == 0:
         raise ValueError("No particles detected in the first frame.")
 
-    kalman_filters = [KalmanFilter2D(x, y) for x, y in centros]
+    kalman_filters = [KalmanFilter2D(x, y) for x, y in centers]
     trajectories = [[kf.state[:2].copy()] for kf in kalman_filters]
     detected_positions = [[kf.state[:2].copy()] for kf in kalman_filters]
     skipped_counts = [0] * len(kalman_filters)
@@ -85,8 +84,8 @@ def track_particles_kalman(
         if not ret:
             break
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        centros_actuales = detectar_centroides(frame_gray)
-        p1 = np.array(centros_actuales, dtype=np.float32)
+        current_centers = detectar_centroides(frame_gray)
+        p1 = np.array(current_centers, dtype=np.float32)
         predictions = np.array([kf.predict() for kf in kalman_filters])
 
         if len(p1) == 0:
@@ -117,8 +116,8 @@ def track_particles_kalman(
                 detected_positions[i].append(detected_positions[i][-1])
                 skipped_counts[i] += 1
 
-        nuevas_detecciones = [p1[i] for i in range(len(p1)) if i not in assigned_det]
-        for det in nuevas_detecciones:
+        new_detections = [p1[i] for i in range(len(p1)) if i not in assigned_det]
+        for det in new_detections:
             new_kf = KalmanFilter2D(det[0], det[1])
             kalman_filters.append(new_kf)
             trajectories.append([det.copy()])
@@ -149,7 +148,65 @@ def track_particles_kalman(
         if cv2.waitKey(30) & 0xFF == 27:
             break
 
-    cap.release()
     cv2.destroyAllWindows()
+
+    # --- Trajentories plot ---
+    fig_main, ax_main = plt.subplots(figsize=(8, 6))
+    
+    for i, traj in enumerate(trajectories):
+        traj_array = np.array(traj)
+        if len(traj_array) > 1:
+            ax_main.plot(traj_array[:, 0], traj_array[:, 1], label=f'Particle {i}')
+            ax_main.scatter(traj_array[0, 0], traj_array[0, 1], marker='o', c='green')  # start
+            ax_main.scatter(traj_array[-1, 0], traj_array[-1, 1], marker='x', c='red')  # final
+
+    ax_main.invert_yaxis()
+    ax_main.set_title("Trajectories of Tracked Particles")
+    ax_main.set_xlabel("X (pixels)")
+    ax_main.set_ylabel("Y (pixels)")
+    ax_main.grid(True)
+    fig_main.tight_layout()
+    plt.show(block=False)
+
+    # --- Legend plot ---
+    fig_legend = plt.figure(figsize=(4, 6))
+    handles, labels = ax_main.get_legend_handles_labels()
+    fig_legend.legend(handles, labels, loc='center', frameon=True)
+    plt.axis('off')
+    plt.title("Particle Labels")
+    plt.tight_layout()
+    plt.show(block=False)
+
+    # --- coordinates of detected positions ---
+    table_data = [["Particle", "Start (x, y) [px]", "End (x, y) [px]"]]
+
+    for i, traj in enumerate(trajectories):
+        traj_array = np.array(traj)
+        if len(traj_array) > 1:
+            x_start, y_start = traj_array[0, 0], traj_array[0, 1]
+            x_end, y_end = traj_array[-1, 0], traj_array[-1, 1]
+            table_data.append([
+                f"{i}",
+                f"({int(x_start)}, {int(y_start)})",
+                f"({int(x_end)}, {int(y_end)})"
+            ])
+
+    fig_table, ax_table = plt.subplots(figsize=(6, len(table_data)*0.4))
+    ax_table.axis('off')  
+
+    table = ax_table.table(
+        cellText=table_data,
+        colLabels=None,
+        cellLoc='center',
+        loc='center'
+    )
+
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.5)  
+
+    plt.title("Coordinates", fontsize=12, fontweight='bold')
+    plt.tight_layout()
+    plt.show(block=False)
 
     return trajectories, detected_positions

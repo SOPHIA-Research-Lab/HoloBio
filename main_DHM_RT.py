@@ -156,7 +156,6 @@ class App(ctk.CTk):
         self.video_playing = None
         self.is_video_preview = None
 
-
         self.viewbox_width = 600
         self.viewbox_height = 450
 
@@ -191,7 +190,7 @@ class App(ctk.CTk):
 
     def _on_load_select(self, choice: str) -> None:
         """Dispatch the two options from the Load menu."""
-        self._reset_source()  # <- 🔴 SIEMPRE detener cualquier cosa activa
+        self._reset_source()  
 
         if choice == "Init Camera":
             self._init_camera()
@@ -2162,13 +2161,14 @@ class App(ctk.CTk):
         self.filter_method_menu.pack(side="left", padx=(0, 20))
 
         self.use_color_filter_var = tk.BooleanVar(value=True)
-        self.color_filter_radio = ctk.CTkRadioButton(
+        self.color_filter_checkbox = ctk.CTkCheckBox(
             self.filterrow_frame,
-            text="Enable color filtering",
+            text="Color filtering",
             variable=self.use_color_filter_var,
-            value=True
+            onvalue=True,
+            offvalue=False
         )
-        self.color_filter_radio.pack(side="left", padx=(0, 5))
+        self.color_filter_checkbox.pack(side="left", padx=(0, 5))
 
         # Area and blob settings
         self.minmax_frame = ctk.CTkFrame(self.particle_tracking_frame, fg_color="transparent")
@@ -2194,17 +2194,17 @@ class App(ctk.CTk):
         self.kalman_frame.grid(row=6, column=0, columnspan=2, padx=10, pady=10, sticky="w")
 
         ctk.CTkLabel(self.kalman_frame, text="Kalman P:").pack(side="left", padx=(0, 3))
-        self.kalman_p_entry = ctk.CTkEntry(self.kalman_frame, width=60)
+        self.kalman_p_entry = ctk.CTkEntry(self.kalman_frame, width=50)
         self.kalman_p_entry.insert(0, "100")
         self.kalman_p_entry.pack(side="left", padx=(0, 10))
 
         ctk.CTkLabel(self.kalman_frame, text="Kalman Q:").pack(side="left", padx=(0, 3))
-        self.kalman_q_entry = ctk.CTkEntry(self.kalman_frame, width=60)
+        self.kalman_q_entry = ctk.CTkEntry(self.kalman_frame, width=50)
         self.kalman_q_entry.insert(0, "0.01")
         self.kalman_q_entry.pack(side="left", padx=(0, 10))
 
         ctk.CTkLabel(self.kalman_frame, text="Kalman R:").pack(side="left", padx=(0, 3))
-        self.kalman_r_entry = ctk.CTkEntry(self.kalman_frame, width=60)
+        self.kalman_r_entry = ctk.CTkEntry(self.kalman_frame, width=50)
         self.kalman_r_entry.insert(0, "1")
         self.kalman_r_entry.pack(side="left", padx=(0, 5))
 
@@ -2233,9 +2233,11 @@ class App(ctk.CTk):
         print("Blob Color:", self.blob_color_entry.get())
         print("Use color filtering:", self.use_color_filter_var.get())
         print("Kalman P/Q/R:", self.kalman_p_entry.get(), self.kalman_q_entry.get(), self.kalman_r_entry.get())
-        video_file_name = 'video_phase_RBC_10x.MP4'
-        folder =r'C:\Users\racastaneq\Documents\MEGA\MEGAsync\RACQ\Universities\05 EAFIT\Research projects\Data_Holograms'
-        movie_full_path = os.path.join(folder, video_file_name)
+
+        if not hasattr(self, "cap") or self.cap is None:
+            tk.messagebox.showwarning("No Video", "Please load a video first.")
+            return
+
         # read parameters form GUI
         try:
             min_area = int(self.min_area_entry.get())
@@ -2247,9 +2249,11 @@ class App(ctk.CTk):
             kalman_q = float(self.kalman_q_entry.get())
             kalman_r = float(self.kalman_r_entry.get())
 
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
             # Call tracking function Kalman
             trajectories, detected_positions = track(
-                video_path=movie_full_path,
+                cap=self.cap,
                 min_area=min_area,
                 max_area=max_area,
                 blob_color=blob_color,
