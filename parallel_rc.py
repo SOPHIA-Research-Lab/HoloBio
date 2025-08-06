@@ -12,6 +12,8 @@ from matplotlib import pyplot as plt
 from PIL import Image
 import glob
 from datetime import datetime
+import hashlib
+from functools import lru_cache
 
 def normalize(x: np.ndarray, scale: float) -> np.ndarray:
     '''Normalize every value of an array to the 0-scale interval.'''
@@ -194,46 +196,102 @@ def open_camera_settings(cap):
     except:
         print('Cannot access camera settings.')
 
+
+def _hash_array(arr: np.ndarray) -> str:
+    """Fast, deterministic hash of a numpy array (content & shape)."""
+    return hashlib.sha1(arr.view(np.uint8)).hexdigest()
+
+@lru_cache(maxsize=16)
+def _precompute_kernel(shape: tuple[int, int],
+                       wavelength: float,
+                       dx: float, dy: float,
+                       scale: float) -> np.ndarray:
+    """Return the z-independent part of the ASM kernel."""
+    M, N = shape
+    x = np.arange(N) - N / 2
+    y = np.arange(M) - M / 2
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    dfx = 1.0 / (dx * N)
+    dfy = 1.0 / (dy * M)
+    return 2 * np.pi * np.sqrt(
+        (1.0 / wavelength) ** 2 - (X * dfx) ** 2 - (Y * dfy) ** 2
+    ) * scale
+ 
+
+def _propagate_cached(field_spec: np.ndarray,
+                      z: float,
+                      wavelength: float,
+                      dx: float, dy: float,
+                      scale: float) -> np.ndarray:
+    """
+    Identical maths to `propagate()` (the slow version) but re-uses
+    the *field_spec* and a cached kernel.  Absolutely no wrap-around
+    artefacts anymore.
+    """
+    kernel = _precompute_kernel(field_spec.shape,
+                                wavelength, dx, dy, scale)
+
+    phase  = np.exp(1j * z * kernel)           #   e^{j·z·2π·scale·√(...)}
+
+    tmp = field_spec * phase                   # ∘ multiply in the spectrum
+    tmp = np.fft.ifftshift(tmp)                # ∘ back to origin
+    out = np.fft.ifft2(tmp)                    # ∘ inverse FT
+    out = np.fft.ifftshift(out)                # ∘ re-centre
+    return out
+
+def _compute_spectrum(field: np.ndarray) -> np.ndarray:
+    return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(field)))
+
+
 def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
+    last_holo_hash = None
+    cached_spec    = None
+    cached_ft      = None
+
     while True:
         inp = queue_manager["reconstruction"]["input"].get()
 
-        holo        = inp["image"].astype(np.float32)
-        algorithm   = inp["algorithm"]
-        L, Z, r     = inp["L"], inp["Z"], inp["r"]
-        wl, dxy     = inp["wavelength"], inp["dxy"]
-        scale       = inp["scale_factor"]
+        holo_u8   = inp["image"].astype(np.float32)
+        algorithm = inp["algorithm"]
+        L, Z, r   = inp["L"], inp["Z"], inp["r"]
+        wl, dxy   = inp["wavelength"], inp["dxy"]
+        scale     = inp["scale_factor"]
 
-        t0 = time.time()
+        t0        = time.time()
+        this_hash = _hash_array(holo_u8)
 
-        # ➊ pick reconstruction algorithm (unchanged) -----------------
+        # ─── build & cache spectrum only when the hologram changes ───
+
+        if this_hash != last_holo_hash:
+            field       = np.sqrt(normalize(holo_u8, 1))
+            cached_spec = _compute_spectrum(field)          
+            ft_cplx     = _compute_spectrum(holo_u8)        
+            cached_ft   = normalize(np.log1p(np.abs(ft_cplx)), 255).astype(np.uint8)
+            last_holo_hash = this_hash
+
+        # ─── pick algorithm ──────────────────────────────────────────
         if algorithm == "AS":
-            field   = np.sqrt(normalize(holo, 1))
-            recon_c = propagate(field, r, wl, dxy, dxy, scale)
+            recon_c = _propagate_cached(cached_spec, r, wl, dxy, dxy, scale)
             amp_f   = np.abs(recon_c)
             phase_f = np.angle(recon_c)
 
         elif algorithm == "KR":
-            field   = np.sqrt(normalize(holo, 1))
-            FC      = filtcosenoF(DEFAULT_COSINE_PERIOD,
-                                  np.array((field.shape[1], field.shape[0])))
-            deltaX  = Z * dxy / L
-            recon_f = kreuzer3F(field, Z, L, wl, dxy, deltaX, FC)
-            amp_f   = recon_f
+            FC     = filtcosenoF(DEFAULT_COSINE_PERIOD,
+                                 np.array((cached_spec.shape[1],
+                                           cached_spec.shape[0])))
+            deltaX = Z * dxy / L
+            amp_f  = kreuzer3F(np.sqrt(normalize(holo_u8, 1)),
+                               Z, L, wl, dxy, deltaX, FC)
             phase_f = np.zeros_like(amp_f)
 
         else:  # DLHM
-            W_c   = dxy * holo.shape[1]
-            amp_f, phase_f = dlhm_rec(holo, L, Z, W_c, dxy, wl)
+            W_c    = dxy * holo_u8.shape[1]
+            amp_f, phase_f = dlhm_rec(holo_u8, L, Z, W_c, dxy, wl)
 
-        # ➋ brand-new: Fourier transform of the hologram --------------
-        ft_cplx = np.fft.fftshift(np.fft.fft2(holo))
-        ft_arr  = normalize(np.log1p(np.abs(ft_cplx)), 255).astype(np.uint8)
-
-        # ➌ build 8-bit views -----------------------------------------
-        amp_arr   = normalize(amp_f,        255).astype(np.uint8)
-        int_arr   = normalize(amp_f ** 2,   255).astype(np.uint8)
-        phase_arr = normalize((phase_f + np.pi) % (2*np.pi) - np.pi,
+        # ─── 8-bit views for the GUI ─────────────────────────────────
+        amp_arr   = normalize(amp_f,             255).astype(np.uint8)
+        int_arr   = normalize(amp_f ** 2,        255).astype(np.uint8)
+        phase_arr = normalize((phase_f + np.pi) % (2 * np.pi) - np.pi,
                               255).astype(np.uint8)
 
         fps = 1.0 / (time.time() - t0 + 1e-12)
@@ -242,74 +300,14 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
             "amp":   amp_arr,
             "int":   int_arr,
             "phase": phase_arr,
-            "ft":    ft_arr,      # <── sent to the GUI
+            "ft":    cached_ft,     # reused unless the holo changes
             "fps":   round(fps, 1),
         }
         if not queue_manager["reconstruction"]["output"].full():
             queue_manager["reconstruction"]["output"].put(packet)
-"""
-def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
-    while True:
-        inp = queue_manager["reconstruction"]["input"].get()
 
-        holo        = inp["image"].astype(np.float32)
-        algorithm   = inp["algorithm"]
-        L, Z, r     = inp["L"], inp["Z"], inp["r"]
-        wl, dxy     = inp["wavelength"], inp["dxy"]
-        scale       = inp["scale_factor"]
-
-        t0 = time.time()
-
-        # ====================== choose algorithm ======================
-        if algorithm == "AS":
-            field   = np.sqrt(normalize(holo, 1))
-            recon_c = propagate(field, r, wl, dxy, dxy, scale)
-            amp_f   = np.abs(recon_c)
-            phase_f = np.angle(recon_c)
-
-        elif algorithm == "KR":
-            field   = np.sqrt(normalize(holo, 1))
-            FC      = filtcosenoF(DEFAULT_COSINE_PERIOD,
-                                  np.array((field.shape[1], field.shape[0])))
-            deltaX  = Z * dxy / L
-            recon_f = kreuzer3F(field, Z, L, wl, dxy, deltaX, FC)
-            amp_f   = recon_f                      # kreuzer3F returns |U|² normalised
-            phase_f = np.zeros_like(amp_f)         # phase not retrieved here
-
-        else:   # ------- DLHM -------------------------------------------------
-            W_c   = dxy * holo.shape[1]            # sensor width
-            amp_f, phase_f = dlhm_rec(holo, L, Z, W_c, dxy, wl)
-
-        # ==================== generate three 8-bit views ======================
-        amp_arr   = normalize(amp_f,        255).astype(np.uint8)
-        int_arr   = normalize(amp_f**2,     255).astype(np.uint8)
-        phase_arr = normalize((phase_f + np.pi) % (2*np.pi) - np.pi,
-                              255).astype(np.uint8)
-
-        fps = 1.0 / (time.time() - t0 + 1e-12)
-
-        packet = {
-            "amp":   amp_arr,
-            "int":   int_arr,
-            "phase": phase_arr,
-            "ft":    ft_arr,
-            "fps":   round(fps, 1),
-        }
-        if not queue_manager["reconstruction"]["output"].full():
-            queue_manager["reconstruction"]["output"].put(packet)
-"""
 
 #DHM 
-
-import numpy as np
-import math as mt
-from matplotlib import pyplot as plt
-from PIL import Image
-import glob
-import cv2
-from datetime import datetime
-##Funciones hechas dentro de CUDA
-#Funciones desde python
 def hora_y_fecha():
     return datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
 
