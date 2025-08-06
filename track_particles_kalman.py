@@ -171,15 +171,6 @@ def track_particles_kalman(
     fig_main.tight_layout()
     plt.show(block=False)
 
-    # --- Legend plot ---
-    fig_legend = plt.figure(figsize=(4, 6))
-    handles, labels = ax_main.get_legend_handles_labels()
-    fig_legend.legend(handles, labels, loc='center', frameon=True)
-    plt.axis('off')
-    plt.title("Particle Labels")
-    plt.tight_layout()
-    plt.show(block=False)
-
     # --- coordinates of detected positions ---
     summary_data = []
     for i, traj in enumerate(trajectories):
