@@ -79,6 +79,9 @@ def track_particles_kalman(
     detected_positions = [[kf.state[:2].copy()] for kf in kalman_filters]
     skipped_counts = [0] * len(kalman_filters)
     mask = np.zeros_like(old_frame)
+    archived_trajectories = []
+    archived_detected_positions = []
+    frame_number = 0
 
     while True:
         ret, frame = cap.read()
@@ -128,10 +131,16 @@ def track_particles_kalman(
         max_skips = 10
         for i in reversed(range(len(kalman_filters))):
             if skipped_counts[i] > max_skips:
+                archived_trajectories.append(trajectories[i])
+                archived_detected_positions.append(detected_positions[i])
                 del kalman_filters[i]
                 del trajectories[i]
                 del detected_positions[i]
                 del skipped_counts[i]
+        
+        frame_number += 1
+        all_trajectories = trajectories + archived_trajectories
+        all_detected_positions = detected_positions + archived_detected_positions
 
         for i, kf in enumerate(kalman_filters):
             trajectories[i].append(kf.state[:2].copy())
@@ -154,7 +163,7 @@ def track_particles_kalman(
     # --- Trajentories plot ---
     fig_main, ax_main = plt.subplots(figsize=(8, 6))
     
-    for i, traj in enumerate(trajectories):
+    for i, traj in enumerate(all_trajectories):
         traj_array = np.array(traj)
         if len(traj_array) > 1:
             ax_main.plot(traj_array[:, 0], traj_array[:, 1], label=f'Particle {i}')
@@ -172,20 +181,22 @@ def track_particles_kalman(
     plt.show(block=False)
 
     # --- coordinates of detected positions ---
-    summary_data = []
-    for i, traj in enumerate(trajectories):
-        traj_array = np.array(traj)
-        if len(traj_array) > 1:
-            x0, y0 = traj_array[0]
-            x1, y1 = traj_array[-1]
-            summary_data.append({
-                "Particle": f"Particle {i}",
-                "X start": int(x0),
-                "Y start": int(y0),
-                "X end": int(x1),
-                "Y end": int(y1)
+    all_positions = []
+
+    for particle_id, traj in enumerate(all_detected_positions ):
+        for frame_idx, pos in enumerate(traj):
+            all_positions.append({
+                "particle_id": particle_id,
+                "frame": frame_idx,
+                "x": float(pos[0]),
+                "y": float(pos[1])
             })
 
-    df_coor = pd.DataFrame(summary_data)
+    df_full = pd.DataFrame(all_positions)
+    df_full['xy'] = list(zip(df_full['x'], df_full['y']))
+    df_pivot = df_full.pivot(index='frame', columns='particle_id', values='xy')
+    df_pivot = df_pivot.applymap(lambda xy: (round(xy[0], 2), round(xy[1], 2)) if pd.notnull(xy) else None)
+    df_pivot.columns = [f"Particle_{int(col)} (x, y)" for col in df_pivot.columns]
+    df_positions_vector = df_pivot.reset_index()
 
-    return trajectories, detected_positions, df_coor
+    return trajectories, detected_positions, df_full, df_positions_vector

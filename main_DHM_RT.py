@@ -2177,7 +2177,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(self.minmax_frame, text="Min Area.").pack(side="left", padx=(0, 3))
         self.min_area_entry = ctk.CTkEntry(self.minmax_frame, width=50)
-        self.min_area_entry.insert(0, "100")
+        self.min_area_entry.insert(0, "110")
         self.min_area_entry.pack(side="left", padx=(0, 10))
 
         ctk.CTkLabel(self.minmax_frame, text="Max Area.").pack(side="left", padx=(0, 3))
@@ -2253,7 +2253,7 @@ class App(ctk.CTk):
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
             # Call tracking function Kalman
-            trajectories, detected_positions, df_coor = track(
+            trajectories, detected_positions, df_full, df_positions_vector = track(
                 cap=self.cap,
                 min_area=min_area,
                 max_area=max_area,
@@ -2265,7 +2265,8 @@ class App(ctk.CTk):
                 enable_color_filter=use_color_filter
             )
 
-            self.show_dataframe_in_table(df_coor, title="Coordinates of detected positions")
+            self.df_positions_vector = df_positions_vector
+            self.show_dataframe_in_table(self.df_positions_vector, title="Positions vector")
 
             print("Tracking completed. Total trajectories:", len(trajectories))
 
