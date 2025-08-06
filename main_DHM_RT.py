@@ -9,6 +9,7 @@ import cv2, os, time, tkinter as tk
 from importlib import import_module, reload
 import functions_GUI as fGUI
 import threading, queue
+from pandastable.core import Table
 from track_particles_kalman import track_particles_kalman as track
 
 
@@ -2252,7 +2253,7 @@ class App(ctk.CTk):
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
             # Call tracking function Kalman
-            trajectories, detected_positions = track(
+            trajectories, detected_positions, df_coor = track(
                 cap=self.cap,
                 min_area=min_area,
                 max_area=max_area,
@@ -2264,12 +2265,29 @@ class App(ctk.CTk):
                 enable_color_filter=use_color_filter
             )
 
+            self.show_dataframe_in_table(df_coor, title="Coordinates of detected positions")
+
             print("Tracking completed. Total trajectories:", len(trajectories))
 
         except Exception as e:
             print("Error during tracking:", e)
             import traceback
             traceback.print_exc()
+
+    def show_dataframe_in_table(self, df, title="Coordinates"):
+        if df.empty:
+            print("No data to display in the table.")
+            return
+
+        table_win = tk.Toplevel(self)
+        table_win.title(title)
+        table_win.geometry("800x400")
+
+        frame = tk.Frame(table_win)
+        frame.pack(fill="both", expand=True)
+
+        pt = Table(frame, dataframe=df, showtoolbar=True, showstatusbar=True)
+        pt.show()
 
     def _on_play(self):
         """Handles Play button."""

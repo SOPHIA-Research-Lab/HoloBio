@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+import pandas as pd
 import matplotlib.pyplot as plt
 
 def track_particles_kalman(
@@ -159,6 +160,8 @@ def track_particles_kalman(
             ax_main.plot(traj_array[:, 0], traj_array[:, 1], label=f'Particle {i}')
             ax_main.scatter(traj_array[0, 0], traj_array[0, 1], marker='o', c='green')  # start
             ax_main.scatter(traj_array[-1, 0], traj_array[-1, 1], marker='x', c='red')  # final
+            ax_main.text(traj_array[-1, 0] + 10, traj_array[-1, 1] - 10, f'{i}', 
+             color='blue', fontsize=10, weight='bold')
 
     ax_main.invert_yaxis()
     ax_main.set_title("Trajectories of Tracked Particles")
@@ -178,35 +181,20 @@ def track_particles_kalman(
     plt.show(block=False)
 
     # --- coordinates of detected positions ---
-    table_data = [["Particle", "Start (x, y) [px]", "End (x, y) [px]"]]
-
+    summary_data = []
     for i, traj in enumerate(trajectories):
         traj_array = np.array(traj)
         if len(traj_array) > 1:
-            x_start, y_start = traj_array[0, 0], traj_array[0, 1]
-            x_end, y_end = traj_array[-1, 0], traj_array[-1, 1]
-            table_data.append([
-                f"{i}",
-                f"({int(x_start)}, {int(y_start)})",
-                f"({int(x_end)}, {int(y_end)})"
-            ])
+            x0, y0 = traj_array[0]
+            x1, y1 = traj_array[-1]
+            summary_data.append({
+                "Particle": f"Particle {i}",
+                "X start": int(x0),
+                "Y start": int(y0),
+                "X end": int(x1),
+                "Y end": int(y1)
+            })
 
-    fig_table, ax_table = plt.subplots(figsize=(6, len(table_data)*0.4))
-    ax_table.axis('off')  
+    df_coor = pd.DataFrame(summary_data)
 
-    table = ax_table.table(
-        cellText=table_data,
-        colLabels=None,
-        cellLoc='center',
-        loc='center'
-    )
-
-    table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1, 1.5)  
-
-    plt.title("Coordinates", fontsize=12, fontweight='bold')
-    plt.tight_layout()
-    plt.show(block=False)
-
-    return trajectories, detected_positions
+    return trajectories, detected_positions, df_coor
