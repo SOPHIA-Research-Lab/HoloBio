@@ -279,8 +279,6 @@ def build_toolbar(app):
     app.theme_menu.grid(row=0, column=5, padx=3, sticky="ew")
     app.theme_menu.set("Theme")
 
-
-
 # Views panels for hologram/fft and Phase/Amplitude
 def build_two_views_panel(app):
     """

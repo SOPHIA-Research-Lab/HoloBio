@@ -156,6 +156,8 @@ class App(ctk.CTk):
         self.ft_display_filtered = False
         self.video_playing = None
         self.is_video_preview = None
+        self.source_mode = None
+        self.is_playing = False
 
         self.viewbox_width = 600
         self.viewbox_height = 450
@@ -194,12 +196,14 @@ class App(ctk.CTk):
         self._reset_source()  
 
         if choice == "Init Camera":
+            self.source_mode = "camera"
             self._init_camera()
             if self.cap and self.cap.isOpened():
                 print("[DEBUG] Calling start_preview_stream")
                 self.start_preview_stream()
 
         elif choice == "Load Video":
+            self.source_mode = "video"
             self.load_video()
 
         self.load_menu.set("Load")
@@ -556,9 +560,6 @@ class App(ctk.CTk):
         """Launches SHPC compensation in a background thread."""
         # parameters
         lam, dx, dy = self._get_pc_parameter_values()
-        if lam is None:
-            tk.messagebox.showwarning("Parameters", "Fill wavelength and pixel pitches first.")
-            return
         self.lambda_um, self.dx_um, self.dy_um = lam, dx, dy
         self.k = 2 * math.pi / self.lambda_um
         self.selected_filter_type = self.spatial_filter_var_pc.get().strip()
@@ -584,6 +585,9 @@ class App(ctk.CTk):
         self._comp_thread.start()
         self.after(20, self._poll_comp_queue)
 
+        # Play button
+        self.is_playing = True
+        self.play_button.configure(text="⏸ Pause")
 
     def _play_video_frame(self) -> None:
         if not getattr(self, "video_playing", False):
@@ -1002,25 +1006,30 @@ class App(ctk.CTk):
         return ImageTk.PhotoImage(resized)
 
     def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ctk.CTkImage:
-        """Return a CTkImage letterboxed to (viewbox_width, viewbox_height)."""
+        """
+        Scales 'pil_image' to fit inside (viewbox_width x viewbox_height),
+        preserving aspect ratio and adding black borders (letterbox) if needed.
+        Returns a CTkImage.
+        """
         max_w, max_h = self.viewbox_width, self.viewbox_height
         orig_w, orig_h = pil_image.size
 
-        # Scale down/up while preserving aspect ratio
+        # Resize
         ratio_w = max_w / float(orig_w)
         ratio_h = max_h / float(orig_h)
         scale_factor = min(ratio_w, ratio_h)
         new_w = int(orig_w * scale_factor)
         new_h = int(orig_h * scale_factor)
-
-        # Letterbox
-        final_img = Image.new("RGB", (max_w, max_h), color=(0, 0, 0))
         resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        # Create a canvas
+        final_img = Image.new("RGB", (max_w, max_h), color=(0, 0, 0))
+
+        # Center image
         offset_x = (max_w - new_w) // 2
         offset_y = (max_h - new_h) // 2
         final_img.paste(resized, (offset_x, offset_y))
 
-        # Return as CTkImage with the exact desired size
         return ctk.CTkImage(light_image=final_img, size=(max_w, max_h))
 
     def previous_hologram_view(self):
@@ -1427,41 +1436,6 @@ class App(ctk.CTk):
 
         self._update_distance_label()
 
-    def next_recon_view(self):
-        """
-        Same method as before, but we call _update_distance_label() at the end
-        to update the title with the propagation distance (if applicable).
-        """
-        current_mode = self.recon_view_var.get()
-
-        # Store current UI filter settings if we are on amplitude or phase
-        if current_mode == "Amplitude Reconstruction ":
-            if hasattr(self, 'current_amp_index'):
-                self._store_current_ui_filter_state(dimension=1, index=self.current_amp_index)
-        else:  # "Phase Reconstruction "
-            if hasattr(self, 'current_phase_index'):
-                self._store_current_ui_filter_state(dimension=2, index=self.current_phase_index)
-
-        # Proceed with your usual logic to increment index
-        if current_mode == "Phase Reconstruction ":
-            if not hasattr(self, 'phase_frames') or len(self.phase_frames) == 0:
-                print("No phase frames to show.")
-                return
-            self.current_phase_index = (self.current_phase_index + 1) % len(self.phase_frames)
-            self.processed_label.configure(image=self.phase_frames[self.current_phase_index])
-            self._load_ui_from_filter_state(dimension=2, index=self.current_phase_index)
-
-        else:  # "Amplitude Reconstruction "
-            if not hasattr(self, 'amplitude_frames') or len(self.amplitude_frames) == 0:
-                print("No amplitude frames to show.")
-                return
-            self.current_amp_index = (self.current_amp_index + 1) % len(self.amplitude_frames)
-            self.processed_label.configure(image=self.amplitude_frames[self.current_amp_index])
-            self._load_ui_from_filter_state(dimension=1, index=self.current_amp_index)
-
-        # Now update the title to reflect distance (if multi-distance numeric propagation)
-        self._update_distance_label()
-
     def _update_distance_label(self):
         # Decide which reconstruction view is active
         current_mode = self.recon_view_var.get()
@@ -1575,7 +1549,7 @@ class App(ctk.CTk):
             self.save_menu.grid_forget()
 
         if option == "Save FT":
-            self.save_ft_images()
+            self.save_hologram_images()
         elif option == "Save Phase":
             self.save_phase_images()
         elif option == "Save Amplitude":
@@ -1602,216 +1576,67 @@ class App(ctk.CTk):
         arr = arr * 255.0
         return arr.astype(np.uint8)
 
-    def save_ft_images(self):
+    # Save FT
+    def save_hologram_images(self):
         """
-        Saves the Fourier transforms in self.multi_ft_arrays,
-        but only normalizes them once using _normalize_for_save.
-        If there's more than 1 FT, we store them all in a ZIP.
-        """
-        if not hasattr(self, 'multi_ft_arrays') or len(self.multi_ft_arrays) == 0:
-            print("No FT images to save.")
+         Saves the currently displayed Fourier Transform image as a file.
+         """
+        if not hasattr(self, "current_ft_array"):
+            messagebox.showerror("No image", "No Fourier Transform image available to save.")
             return
 
-        count = len(self.multi_ft_arrays)
-        if count == 1:
-            # Single image => direct file
-            save_path = filedialog.asksaveasfilename(
-                title="Save Fourier Transform",
-                defaultextension=".png",
-                filetypes=[("PNG files","*.png"),
-                           ("BMP files","*.bmp"),
-                           ("JPEG files","*.jpg"),
-                           ("All files","*.*")]
-            )
-            if not save_path:
-                print("Canceled.")
-                return
-            arr_norm = self._normalize_for_save(self.multi_ft_arrays[0])
-            single_img = Image.fromarray(arr_norm)
-            single_img.save(save_path)
-            print(f"Fourier transform saved: {save_path}")
-        else:
-            # Multiple => ZIP
-            zip_path = filedialog.asksaveasfilename(
-                title="Save multiple FT as ZIP",
-                defaultextension=".zip",
-                filetypes=[("Zip archive","*.zip"), ("All files","*.*")]
-            )
-            if not zip_path:
-                print("Canceled.")
-                return
+        save_path = filedialog.asksaveasfilename(
+            title="Save Fourier Transform",
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"),
+                       ("BMP files", "*.bmp"),
+                       ("JPEG files", "*.jpg"),
+                       ("All files", "*.*")]
+        )
+        if not save_path:
+            return
 
-            extension_win = tk.Toplevel(self)
-            extension_win.title("Choose image format for FT inside ZIP")
-            extension_win.geometry("400x200")
-            lab = tk.Label(extension_win, text="Pick format (png, bmp, jpg, etc.):")
-            lab.pack(pady=10)
-            fmt_var = tk.StringVar(value="png")
-            fmt_entry = tk.Entry(extension_win, textvariable=fmt_var, width=10, font=("Helvetica",14))
-            fmt_entry.pack(pady=5)
+        arr_norm = self._normalize_for_save(self.current_ft_array)
+        img = Image.fromarray(arr_norm)
+        img.save(save_path)
 
-            def confirm_fmt():
-                extension_win.destroy()
-
-            btn = tk.Button(extension_win, text="OK", command=confirm_fmt)
-            btn.pack(pady=10)
-            extension_win.transient(self)
-            extension_win.grab_set()
-            extension_win.wait_window(extension_win)
-
-            chosen_fmt = fmt_var.get().lower().replace(".", "")
-
-            with zipfile.ZipFile(zip_path, 'w') as zf:
-                for i, arr in enumerate(self.multi_ft_arrays):
-                    arr_norm = self._normalize_for_save(arr)
-                    file_in_zip = f"FT_{i:03d}.{chosen_fmt}"
-                    buf = io.BytesIO()
-                    Image.fromarray(arr_norm).save(buf, format=chosen_fmt.upper())
-                    zf.writestr(file_in_zip, buf.getvalue())
-
-            print(f"Saved multiple FT images into: {zip_path}")
-
-    # Save Phase Images (modified)
+    # Save Phase Images
     def save_phase_images(self):
-        """
-        Saves phase images in self.phase_arrays, applying
-        _normalize_for_save exactly once. Single => direct file,
-        multiple => ZIP. Larger pop-up for format as well.
-        """
-
-        if not self.phase_arrays:
-            print("No phase images to save.")
+        if not hasattr(self, "current_phase_array"):
+            messagebox.showerror("No image", "No phase image available to save.")
             return
 
-        count = len(self.phase_arrays)
-        if count == 1:
-            save_path = filedialog.asksaveasfilename(
-                title="Save Phase",
-                defaultextension=".png",
-                filetypes=[("PNG files","*.png"), ("BMP files","*.bmp"),
-                           ("JPEG files","*.jpg"), ("All files","*.*")]
-            )
-            if not save_path:
-                print("Canceled.")
-                return
+        save_path = filedialog.asksaveasfilename(
+            title="Save Phase",
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("BMP files", "*.bmp"),
+                       ("JPEG files", "*.jpg"), ("All files", "*.*")]
+        )
+        if not save_path:
+            return
 
-            arr_norm = self._normalize_for_save(self.phase_arrays[0])
-            single_img = Image.fromarray(arr_norm)
-            single_img.save(save_path)
-            print(f"Phase image saved: {save_path}")
-        else:
-            zip_path = filedialog.asksaveasfilename(
-                title="Save multiple phases as ZIP",
-                defaultextension=".zip",
-                filetypes=[("Zip archive","*.zip"), ("All files","*.*")]
-            )
-            if not zip_path:
-                print("Canceled.")
-                return
+        arr_norm = self._normalize_for_save(self.current_phase_array)
+        img = Image.fromarray(arr_norm)
+        img.save(save_path)
 
-            extension_win = tk.Toplevel(self)
-            extension_win.title("Choose image format for phases inside ZIP")
-            extension_win.geometry("400x200")
-            lbl = tk.Label(extension_win, text="Pick format (png, bmp, etc.):")
-            lbl.pack(pady=10)
-            fmt_var = tk.StringVar(value="png")
-            fmt_entry = tk.Entry(extension_win, textvariable=fmt_var, width=10, font=("Helvetica",14))
-            fmt_entry.pack(pady=5)
-
-            def confirm_fmt():
-                extension_win.destroy()
-
-            tk.Button(extension_win, text="OK", command=confirm_fmt).pack(pady=10)
-            extension_win.transient(self)
-            extension_win.grab_set()
-            extension_win.wait_window(extension_win)
-
-            chosen_fmt = fmt_var.get().lower().replace(".", "")
-
-            with zipfile.ZipFile(zip_path, 'w') as zf:
-                for i, arr in enumerate(self.phase_arrays):
-                    arr_norm = self._normalize_for_save(arr)
-                    if hasattr(self, 'propagation_distances') and i < len(self.propagation_distances):
-                        dist_val = self.propagation_distances[i]
-                        dist_str = f"_dist{dist_val:.2f}um"
-                    else:
-                        dist_str = f"_{i:03d}"
-                    filename_in_zip = f"Phase{dist_str}.{chosen_fmt}"
-
-                    buf = io.BytesIO()
-                    Image.fromarray(arr_norm).save(buf, format=chosen_fmt.upper())
-                    zf.writestr(filename_in_zip, buf.getvalue())
-
-            print(f"Multiple phase images saved in: {zip_path}")
-
+    # Save Amplitude Images
     def save_amplitude_images(self):
-        """
-        Saves amplitude images in self.amplitude_arrays, applying
-        _normalize_for_save exactly once. Single => file,
-        multiple => ZIP with bigger pop-up.
-        """
-        if not self.amplitude_arrays:
-            print("No amplitude images to save.")
+        if not hasattr(self, "current_amplitude_array"):
+            messagebox.showerror("No image", "No amplitude image available to save.")
             return
 
-        count = len(self.amplitude_arrays)
-        if count == 1:
-            save_path = filedialog.asksaveasfilename(
-                title="Save Amplitude",
-                defaultextension=".png",
-                filetypes=[("PNG files","*.png"), ("BMP files","*.bmp"),
-                           ("JPEG files","*.jpg"), ("All files","*.*")]
-            )
-            if not save_path:
-                print("Canceled.")
-                return
+        save_path = filedialog.asksaveasfilename(
+            title="Save Amplitude",
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("BMP files", "*.bmp"),
+                       ("JPEG files", "*.jpg"), ("All files", "*.*")]
+        )
+        if not save_path:
+            return
 
-            arr_norm = self._normalize_for_save(self.amplitude_arrays[0])
-            single_img = Image.fromarray(arr_norm)
-            single_img.save(save_path)
-            print(f"Amplitude image saved: {save_path}")
-        else:
-            zip_path = filedialog.asksaveasfilename(
-                title="Save multiple amplitudes as ZIP",
-                defaultextension=".zip",
-                filetypes=[("Zip archive","*.zip"), ("All files","*.*")]
-            )
-            if not zip_path:
-                print("Canceled.")
-                return
-
-            ext_win = tk.Toplevel(self)
-            ext_win.title("Choose image format for amplitudes inside ZIP")
-            ext_win.geometry("400x200")
-            lab = tk.Label(ext_win, text="Pick format (png, bmp, etc.):")
-            lab.pack(pady=10)
-            fmt_var = tk.StringVar(value="png")
-            fmt_entry = tk.Entry(ext_win, textvariable=fmt_var, width=10, font=("Helvetica",14))
-            fmt_entry.pack(pady=5)
-
-            def confirm_fmt():
-                ext_win.destroy()
-
-            tk.Button(ext_win, text="OK", command=confirm_fmt).pack(pady=10)
-            ext_win.transient(self)
-            ext_win.grab_set()
-            ext_win.wait_window(ext_win)
-
-            chosen_fmt = fmt_var.get().lower().replace(".", "")
-
-            with zipfile.ZipFile(zip_path, 'w') as zf:
-                for i, arr in enumerate(self.amplitude_arrays):
-                    arr_norm = self._normalize_for_save(arr)
-                    if hasattr(self, 'propagation_distances') and i < len(self.propagation_distances):
-                        dist_val = self.propagation_distances[i]
-                        dist_str = f"_dist{dist_val:.2f}um"
-                    else:
-                        dist_str = f"_{i:03d}"
-                    file_in_zip = f"Amplitude{dist_str}.{chosen_fmt}"
-
-                    buf = io.BytesIO()
-                    Image.fromarray(arr_norm).save(buf, format=chosen_fmt.upper())
-                    zf.writestr(file_in_zip, buf.getvalue())
+        arr_norm = self._normalize_for_save(self.current_amplitude_array)
+        img = Image.fromarray(arr_norm)
+        img.save(save_path)
 
     def reset_reconstruction_data(self):
         self.amplitude_arrays.clear()
@@ -1829,29 +1654,32 @@ class App(ctk.CTk):
 
     def _get_pc_parameter_values(self):
         try:
-            lam_um   = self.get_value_in_micrometers(
-                self.wave_label_pc_entry.get(),   self.wavelength_unit)
-            pitch_x  = self.get_value_in_micrometers(
+            lam_um = self.get_value_in_micrometers(
+                self.wave_label_pc_entry.get(), self.wavelength_unit)
+        except Exception:
+            lam_um = 0.0
+
+        try:
+            pitch_x = self.get_value_in_micrometers(
                 self.pitchx_label_pc_entry.get(), self.pitch_x_unit)
-            pitch_y  = self.get_value_in_micrometers(
+        except Exception:
+            pitch_x = 0.0
+
+        try:
+            pitch_y = self.get_value_in_micrometers(
                 self.pitchy_label_pc_entry.get(), self.pitch_y_unit)
-        except ValueError as e:
-            print(f"[Parameters] {e}")
+        except Exception:
+            pitch_y = 0.0
+
+            # Verificación
+        if lam_um == 0.0 or pitch_x == 0.0 or pitch_y == 0.0:
+            messagebox.showwarning(
+                "Warning",
+                "Reconstruction parameters (wavelength and pixel size) cannot be zero. Please verify them before proceeding."
+            )
             return None, None, None
 
-        if lam_um == 0 or pitch_x == 0 or pitch_y == 0:
-            print("[Parameters] Please fill wavelength and both pitches.")
-            return None, None, None
-
-        # cache for global use
-        self.wavelength = lam_um
-        self.pitch_x    = pitch_x
-        self.pitch_y    = pitch_y
         return lam_um, pitch_x, pitch_y
-
-    def stop_recording(self):
-        self.is_recording = False
-        tk.messagebox.showinfo("Record", "Recording stopped.")
 
     def _prefill_record_buffer(self) -> None:
         """
@@ -2292,58 +2120,49 @@ class App(ctk.CTk):
 
     def _on_play(self):
         """Handles Play button."""
-        if getattr(self, "is_video_preview", False):
-            self.resume_video_preview()
+        self.stop_compensation()
+
+        if self.is_playing:
+            # Action Pause
+            self.is_playing = False
+            self.play_button.configure(text="▶ Play")
+
+            if self.source_mode == "video":
+                self.video_playing = False
+            elif self.source_mode == "camera":
+                self.preview_active = False
         else:
-            self.start_compensation()
+            # Action Play
+            self.is_playing = True
+            self.play_button.configure(text="⏸ Pause")
+
+            if self.source_mode == "video":
+                self.resume_video_preview()
+            elif self.source_mode == "camera":
+                self.start_preview_stream()
 
     def _on_stop(self):
         """Handles Stop button."""
         self.preview_active = False
         self.video_playing = False
+        self.realtime_active = False
+        self.is_playing = False
+        self.play_button.configure(text="▶ Play")
         self.stop_compensation()
 
-    def _build_record_frame(self, parent, row_idx):
-        """
-        Adds the 3-button recording widget exactly as requested:
-        """
-        self.record_frame = ctk.CTkFrame(
-            parent, width=PARAMETER_FRAME_WIDTH, height=PARAMETER_FRAME_HEIGHT
-        )
-        self.record_frame.grid(row=row_idx, column=0, sticky="ew", pady=2)
-        self.record_frame.grid_propagate(False)
-        for col in (0, 1, 2, 3):
-            self.record_frame.columnconfigure(col, weight=1)
 
-        ctk.CTkLabel(self.record_frame, text="Record").grid(
-            row=0, column=0, padx=10, pady=10, sticky="w"
-        )
-
-        self.record_var = ctk.StringVar(value="Phase")
-        ctk.CTkOptionMenu(
-            self.record_frame,
-            values=["Phase", "Amplitude", "Hologram"],
-            variable=self.record_var,
-            width=120
-        ).grid(row=0, column=1, padx=(0, 5), pady=10, sticky="w")
-
-        ctk.CTkButton(
-            self.record_frame, text="Start", width=70,
-            command=self.start_record
-        ).grid(row=0, column=2, padx=(0, 5), pady=10, sticky="ew")
-
-        ctk.CTkButton(
-            self.record_frame, text="Stop", width=70,
-            command=self.stop_recording
-        ).grid(row=0, column=3, padx=(0, 10), pady=10, sticky="ew")
-
-        # red “● REC” sign (hidden until recording starts)
-        self.record_indicator = ctk.CTkLabel(
-            self.record_frame, text="●  REC", text_color="red",
-            font=ctk.CTkFont(weight="bold")
-        )
-        self.record_indicator.grid(row=1, column=0, columnspan=4, pady=(0, 6))
-        self.record_indicator.grid_remove()
+        # If mode is camera / video
+        if self.source_mode == "camera":
+            if hasattr(self, "cap") and self.cap:
+                self.cap.release()
+                self.cap = None
+        elif self.source_mode == "video":
+            if hasattr(self, "_video_loop_id"):
+                self.after_cancel(self._video_loop_id)
+                del self._video_loop_id
+            if hasattr(self, "cap") and self.cap:
+                self.cap.release()
+                self.cap = None
 
     def _sync_canvas_and_frame_bg(self):
         mode = ctk.get_appearance_mode()
