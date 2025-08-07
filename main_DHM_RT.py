@@ -199,7 +199,6 @@ class App(ctk.CTk):
             self.source_mode = "camera"
             self._init_camera()
             if self.cap and self.cap.isOpened():
-                print("[DEBUG] Calling start_preview_stream")
                 self.start_preview_stream()
 
         elif choice == "Load Video":
@@ -211,8 +210,6 @@ class App(ctk.CTk):
 
     def _reset_source(self) -> None:
         """Stops any running camera/video and clears cache/memory."""
-        print("[DEBUG] Resetting sources (camera/video)")
-
         self.preview_active = False
         self.video_playing = False
         self.realtime_active = False
@@ -225,7 +222,6 @@ class App(ctk.CTk):
         # Cancel background thread
         if hasattr(self, "play_thread") and self.play_thread is not None:
             if self.play_thread.is_alive():
-                print("[DEBUG] Joining active play_thread...")
                 self.play_thread.join(timeout=1.0)
             self.play_thread = None
 
@@ -235,7 +231,6 @@ class App(ctk.CTk):
 
         # Release any video/camera
         if hasattr(self, "cap") and self.cap is not None:
-            print("[DEBUG] Releasing cap")
             self.cap.release()
             self.cap = None
 
@@ -309,6 +304,11 @@ class App(ctk.CTk):
             tk.messagebox.showerror("Video Error", "Could not open the selected video.")
             return
 
+        # Store source FPS for later use when saving
+        self.source_fps = self.cap.get(cv2.CAP_PROP_FPS) or 0.0
+        if self.source_fps <= 0 or self.source_fps > 240:  # fallback if invalid
+            self.source_fps = 30.0
+
         self.is_video_preview = True
         self.preview_active = False
         self.video_playing = False
@@ -368,45 +368,43 @@ class App(ctk.CTk):
 
         gray = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY)
         ft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(gray.astype(np.float32))))
-        ft_log = (np.log1p(np.abs(ft)) /
-                  np.log1p(np.abs(ft)).max() * 255).astype(np.uint8)
+
+        # Apply logarithmic scaling based on ft_mode_var
+        if hasattr(self, 'ft_mode_var') and self.ft_mode_var.get() == "With logarithmic scale":
+            ft_log = (np.log1p(np.abs(ft)) / np.log1p(np.abs(ft)).max() * 255).astype(np.uint8)
+        else:
+            ft_log = (np.abs(ft) / np.abs(ft).max() * 255).astype(np.uint8)
+
+        # Always update array
+        self.current_holo_array = gray
+        self.current_ft_array = ft_log
+
+        # Prepare unfiltered FT data for _refresh_ft_display
+        self.current_ft_unfiltered_array = ft_log
+        self.current_ft_unfiltered_tk = self._preserve_aspect_ratio(
+            Image.fromarray(ft_log), self.viewbox_width, self.viewbox_height
+        )
 
         holo_tk = self._preserve_aspect_ratio(Image.fromarray(gray),
                                               self.viewbox_width, self.viewbox_height)
-        ft_tk = self._preserve_aspect_ratio(Image.fromarray(ft_log),
-                                              self.viewbox_width, self.viewbox_height)
 
         self.hologram_frames = [holo_tk]
-        self.ft_frames = [ft_tk]
+        self.ft_frames = [self.current_ft_unfiltered_tk]
         self.multi_holo_arrays = [gray]
         self.multi_ft_arrays = [ft_log]
-        self.current_holo_array = gray
-        self.current_ft_array = ft_log
         self.current_left_index = 0
 
-        if self.holo_view_var.get() == "Hologram":
+        # Always check the selection fo the radio button
+        current_choice = self.holo_view_var.get()
+        if current_choice == "Hologram":
             self.captured_label.configure(image=holo_tk)
-        else:
-            self.captured_label.configure(image=ft_tk)
+            self.captured_label.image = holo_tk
+        elif current_choice == "Fourier Transform":
+            # Use _refresh_ft_display to respect the filtered/unfiltered selection
+            self.captured_title_label.configure(text="Fourier Transform")
+            self._refresh_ft_display()
+
         self.after(40, self._play_video_preview)
-
-    def _play_video_frame_compensate(self) -> None:
-        if not getattr(self, "video_playing", False):
-            return
-
-        ok, frm = self.cap.read()
-        if not ok:
-            self._handle_video_end()
-            return
-
-        gray = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY)
-
-        if not self.first_frame_done:
-            self._process_first_frame(gray)
-        else:
-            self._process_next_frame(gray)
-
-        self.after(40, self._play_video_frame_compensate)
 
     def _comp_worker_loop(self, source: str) -> None:
         while not self._stop_compensation.is_set():
@@ -441,15 +439,21 @@ class App(ctk.CTk):
             h, w = gray.shape
             ftype = self.selected_filter_type
             ft_filt, fy, fx = self.spatialFilteringCF(
-                gray, h, w, filter_type=ftype, manual_coords=None)
+                gray, h, w, filter_type=ftype)
             self.fx, self.fy = fx[0], fy[0]
         else:
-            # skim-fast refinement around previous carrier ─ small mask
             h, w = gray.shape
             ft_raw = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(gray)))
-            yy, xx = np.ogrid[:h, :w]
-            rad = 0.08 * min(h, w)
-            mask = ((yy - self.fy)**2 + (xx - self.fx)**2) <= rad**2
+            radius = 0.08 * min(h, w)
+
+            ftype = self.selected_filter_type
+            if ftype == "Rectangular":
+                mask = self.rectangularMask(h, w, radius, self.fy, self.fx)
+            else:
+                # Default to circular
+                yy, xx = np.ogrid[:h, :w]
+                mask = ((yy - self.fy) ** 2 + (xx - self.fx) ** 2) <= radius ** 2
+
             ft_filt = ft_raw * mask
 
         # reconstruction  (same maths as before, no ImageTk)
@@ -496,6 +500,15 @@ class App(ctk.CTk):
             os.environ["OPENCV_VIDEOIO_FFMPEG_DECODER_N_THREADS"] = "1"
 
     def _poll_comp_queue(self) -> None:
+        """
+        Pull one processed packet from the worker queue and refresh the UI.
+        This is the ONLY place we append frames to the recording buffers
+        when compensation runs in the background thread.
+
+        Expected packet layout: dict with uint8 arrays:
+          {"holo": HxW, "ft": HxW, "amp": HxW, "phase": HxW}
+        """
+        # Try to get data from the queue; if empty, reschedule and exit
         try:
             data = self._comp_queue.get_nowait()
         except queue.Empty:
@@ -503,25 +516,29 @@ class App(ctk.CTk):
                 self.after(10, self._poll_comp_queue)
             return
 
-        #  cache numpy arrays for zoom / save
+        # Cache numpy arrays (used for zoom, save, etc.)
         self.current_holo_array = data["holo"]
-        self.current_ft_array = data["ft"]
+        self.current_ft_array = data["ft"]  # default for zoom/save
         self.current_amplitude_array = data["amp"]
         self.current_phase_array = data["phase"]
 
-        # build Tk thumbnails (lightweight)
+        # Build small Tk images for the viewers (lightweight thumbnails)
         holo_tk = self._preserve_aspect_ratio(
-                     Image.fromarray(data["holo"]),
-                     self.viewbox_width, self.viewbox_height)
+            Image.fromarray(data["holo"]),
+            self.viewbox_width, self.viewbox_height
+        )
         ft_tk = self._preserve_aspect_ratio(
-                     Image.fromarray(data["ft"]),
-                     self.viewbox_width, self.viewbox_height)
+            Image.fromarray(data["ft"]),
+            self.viewbox_width, self.viewbox_height
+        )
         amp_tk = self._preserve_aspect_ratio_right(
-                     Image.fromarray(data["amp"]))
+            Image.fromarray(data["amp"])
+        )
         pha_tk = self._preserve_aspect_ratio_right(
-                     Image.fromarray(data["phase"]))
+            Image.fromarray(data["phase"])
+        )
 
-        # accumulate lists so ‘Save …’ always finds data
+        # Keep lists in sync so navigation & "Save ..." always find data
         self.hologram_frames.append(holo_tk)
         self.ft_frames.append(ft_tk)
         self.multi_holo_arrays.append(data["holo"])
@@ -532,27 +549,57 @@ class App(ctk.CTk):
         self.amplitude_arrays.append(data["amp"])
         self.phase_arrays.append(data["phase"])
 
-        # update left viewer
-        if self.holo_view_var.get() == "Hologram":
-            self.captured_label.configure(image=holo_tk)
-        else:
-            self.captured_label.configure(image=ft_tk)
+        # Prepare filtered/unfiltered FT for left viewer toggle
+        self.current_ft_filtered_tk = ft_tk
+        self.current_ft_filtered_array = data["ft"]
 
-        # Update right viewer
-        if self.recon_view_var.get() == "Amplitude Reconstruction ":
+        # "unfiltered" = recompute from the current hologram (display-only)
+        ft_unfiltered = np.fft.fftshift(
+            np.fft.fft2(np.fft.fftshift(data["holo"].astype(np.float32)))
+        )
+        if hasattr(self, 'ft_mode_var') and self.ft_mode_var.get() == "With logarithmic scale":
+            ft_unf_disp = (np.log1p(np.abs(ft_unfiltered)) /
+                           np.log1p(np.abs(ft_unfiltered)).max() * 255).astype(np.uint8)
+        else:
+            abs_ft = np.abs(ft_unfiltered)
+            abs_max = abs_ft.max() if abs_ft.max() > 0 else 1.0
+            ft_unf_disp = (abs_ft / abs_max * 255).astype(np.uint8)
+
+        self.current_ft_unfiltered_tk = self._preserve_aspect_ratio(
+            Image.fromarray(ft_unf_disp),
+            self.viewbox_width, self.viewbox_height
+        )
+        self.current_ft_unfiltered_array = ft_unf_disp
+
+        # Update LEFT viewer (respect Hologram/FT + filtered/unfiltered choice)
+        left_choice = self.holo_view_var.get()
+        if left_choice == "Hologram":
+            self.captured_title_label.configure(text="Hologram")
+            self.captured_label.configure(image=holo_tk)
+            self.captured_label.image = holo_tk
+        elif left_choice == "Fourier Transform":
+            self.captured_title_label.configure(text="Fourier Transform")
+            self._refresh_ft_display()
+
+        # Update RIGHT viewer (Amplitude / Phase)
+        right_choice = self.recon_view_var.get()
+        if right_choice == "Amplitude Reconstruction ":
             self.processed_label.configure(image=amp_tk)
+            self.processed_label.image = amp_tk
         else:
             self.processed_label.configure(image=pha_tk)
+            self.processed_label.image = pha_tk
 
-        # keep references alive
-        self.captured_label.image = (holo_tk if self.holo_view_var.get()=="Hologram"
-                                      else ft_tk)
-        self.processed_label.image = (amp_tk if self.recon_view_var.get().startswith("Amplitude")
-                                      else pha_tk)
+        # While recording, append the correct buffer HERE (worker path)
+        if getattr(self, "is_recording", False):
+            if self.target_to_record == "Amplitude":
+                self.buff_amp.append(data["amp"].copy())
+            elif self.target_to_record == "Phase":
+                self.buff_phase.append(data["phase"].copy())
+            elif self.target_to_record == "Hologram":
+                self.buff_holo.append(data["holo"].copy())
 
-        self.holo_view_var = tk.StringVar(value="Hologram")
-
-        # schedule next poll
+        # Schedule next poll if the worker is still active
         if not self._stop_compensation.is_set():
             self.after(10, self._poll_comp_queue)
 
@@ -564,7 +611,7 @@ class App(ctk.CTk):
         self.k = 2 * math.pi / self.lambda_um
         self.selected_filter_type = self.spatial_filter_var_pc.get().strip()
 
-        # source (camera / video)
+        # stop any previous compensation first
         self.stop_compensation()
 
         if getattr(self, "is_video_preview", False):
@@ -576,18 +623,21 @@ class App(ctk.CTk):
                 return
             src = "camera"
 
-        # Worker thread
+        # reset flags
         self._stop_compensation.clear()
         self.first_frame_done = False
+        self.is_playing = True
+        self.play_button.configure(text="⏸ Pause")
+
+        if src == "camera":
+            self._update_realtime()
+            print("inside real time")
+
         self._comp_thread = threading.Thread(
             target=self._comp_worker_loop, args=(src,), daemon=True
         )
         self._comp_thread.start()
         self.after(20, self._poll_comp_queue)
-
-        # Play button
-        self.is_playing = True
-        self.play_button.configure(text="⏸ Pause")
 
     def _play_video_frame(self) -> None:
         if not getattr(self, "video_playing", False):
@@ -599,7 +649,7 @@ class App(ctk.CTk):
             return
 
         gray = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY)
-
+        print("DEBUG: INSIDE VIDEO FRAME")
         if not self.first_frame_done:
             self._process_first_frame(gray)
         else:
@@ -635,9 +685,68 @@ class App(ctk.CTk):
         menu.tk_popup(self.ft_mode_button.winfo_rootx(),
                       self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
 
+    def update_left_view_video(self):
+        """Update left view specifically for video mode"""
+        choice = self.holo_view_var.get()
+
+        # Check if we have current hologram data
+        if hasattr(self, 'current_holo_array') and self.current_holo_array is not None:
+
+            if choice == "Hologram":
+                # Show hologram
+                self.captured_title_label.configure(text="Hologram")
+                holo_tk = self._preserve_aspect_ratio(
+                    Image.fromarray(self.current_holo_array),
+                    self.viewbox_width, self.viewbox_height
+                )
+                self.captured_label.configure(image=holo_tk)
+                self.captured_label.image = holo_tk
+
+            elif choice == "Fourier Transform":
+                # Use the existing _refresh_ft_display logic for consistency
+                # But first ensure we have the basic FT data for video
+                if not hasattr(self, 'current_ft_array') or self.current_ft_array is None:
+                    # Calculate unfiltered FFT from current hologram
+                    ft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(self.current_holo_array.astype(np.float32))))
+
+                    # Apply logarithmic scaling based on ft_mode_var
+                    if hasattr(self, 'ft_mode_var') and self.ft_mode_var.get() == "With logarithmic scale":
+                        self.current_ft_array = (np.log1p(np.abs(ft)) / np.log1p(np.abs(ft)).max() * 255).astype(
+                            np.uint8)
+                    else:
+                        self.current_ft_array = (np.abs(ft) / np.abs(ft).max() * 255).astype(np.uint8)
+
+                    # Create the PhotoImage for unfiltered FT
+                    self.current_ft_unfiltered_tk = self._preserve_aspect_ratio(
+                        Image.fromarray(self.current_ft_array),
+                        self.viewbox_width, self.viewbox_height
+                    )
+                    self.current_ft_unfiltered_array = self.current_ft_array
+
+                # Now use the existing _refresh_ft_display function
+                self.captured_title_label.configure(text="Fourier Transform")
+                self._refresh_ft_display()
+
+        else:
+            # Fallback if no current arrays are available
+            if choice == "Hologram":
+                self.captured_title_label.configure(text="Hologram")
+                self.captured_label.configure(image=self.img_hologram)
+            else:
+                self.captured_title_label.configure(text="Fourier Transform")
+                self.captured_label.configure(image=self.img_ft)
+
     def _on_ft_mode_changed(self):
         if self.holo_view_var.get() == "Fourier Transform":
-            self.update_left_view()
+            if hasattr(self, "comp_source"):
+                if self.comp_source == "camera":
+                    self.update_left_view_camera()
+                elif self.comp_source == "video":
+                    self.update_left_view_video()
+                else:
+                    self.update_left_view()
+            else:
+                self.update_left_view()
 
     def _show_amp_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
@@ -711,9 +820,10 @@ class App(ctk.CTk):
         if self.sequence_recording:
             self._save_sequence_frame(gray)
 
-        # Schedule next frame (≈50 fps)
+        # Schedule next frame
         self.after(20, self._update_preview)
 
+    '''
     def stop_preview_stream(self) -> None:
         """Stops the live hologram/FT preview."""
         self.preview_active = False
@@ -732,7 +842,9 @@ class App(ctk.CTk):
         self.cap.release()
         self.cap = None
         print("[Realtime] Realtime stream stopped.")
+    '''
 
+    '''
     def start_sequence_recording(self) -> None:
         """Ask for a parent folder and start saving incoming frames."""
         if self.sequence_recording:
@@ -750,13 +862,16 @@ class App(ctk.CTk):
         self.seq_frame_counter = 0
         self.sequence_recording = True
         tk.messagebox.showinfo("Sequence", "Recording started.")
+    '''
 
+    '''
     def stop_sequence_recording(self) -> None:
         """Stop writing new frames to disk."""
         if not self.sequence_recording:
             return
         self.sequence_recording = False
         tk.messagebox.showinfo("Sequence", "Recording stopped.")
+    '''
 
     def _save_sequence_frame(
         self,
@@ -1005,32 +1120,23 @@ class App(ctk.CTk):
 
         return ImageTk.PhotoImage(resized)
 
-    def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ctk.CTkImage:
-        """
-        Scales 'pil_image' to fit inside (viewbox_width x viewbox_height),
-        preserving aspect ratio and adding black borders (letterbox) if needed.
-        Returns a CTkImage.
-        """
-        max_w, max_h = self.viewbox_width, self.viewbox_height
-        orig_w, orig_h = pil_image.size
+    def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ImageTk.PhotoImage:
+        max_width, max_height = self.viewbox_width, self.viewbox_height
+        original_w, original_h = pil_image.size
 
-        # Resize
-        ratio_w = max_w / float(orig_w)
-        ratio_h = max_h / float(orig_h)
-        scale_factor = min(ratio_w, ratio_h)
-        new_w = int(orig_w * scale_factor)
-        new_h = int(orig_h * scale_factor)
-        resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        #  If smaller or equal, no upscaling (unless you want to allow it).
+        if original_w <= max_width and original_h <= max_height:
+            resized = pil_image
+        else:
+            # We shrink to keep the aspect ratio correct
+            ratio_w = max_width / float(original_w)
+            ratio_h = max_height / float(original_h)
+            scale_factor = min(ratio_w, ratio_h)
+            new_w = int(original_w * scale_factor)
+            new_h = int(original_h * scale_factor)
+            resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-        # Create a canvas
-        final_img = Image.new("RGB", (max_w, max_h), color=(0, 0, 0))
-
-        # Center image
-        offset_x = (max_w - new_w) // 2
-        offset_y = (max_h - new_h) // 2
-        final_img.paste(resized, (offset_x, offset_y))
-
-        return ctk.CTkImage(light_image=final_img, size=(max_w, max_h))
+        return ImageTk.PhotoImage(resized)
 
     def previous_hologram_view(self):
         # Store current UI filter settings for the current hologram/FT index
@@ -1087,6 +1193,23 @@ class App(ctk.CTk):
             self._load_ui_from_filter_state(dimension=0, index=self.current_left_index)
 
     def update_left_view(self, *, reload_ui: bool = True):
+        """Handle left view changes for both camera and video modes"""
+
+        # If we are in video mode and have frames available
+        if hasattr(self, 'source_mode') and self.source_mode == "video":
+            self.update_left_view_video()
+
+        # If we are in camera mode, view updates automatically in _update_preview
+        elif hasattr(self, 'source_mode') and self.source_mode == "camera":
+            # Do nothing, _update_preview handles this automatically
+            pass
+
+        else:
+            # Default mode (static images) - original logic
+            self.update_left_view_static(reload_ui=reload_ui)
+
+    def update_left_view_static(self, *, reload_ui: bool = True):
+        """Update left view for static images (original logic)"""
         choice = self.holo_view_var.get()
 
         # Fallback when no images are loaded
@@ -1112,6 +1235,7 @@ class App(ctk.CTk):
             self.captured_label.configure(image=self.ft_frames[self.current_left_index])
             self.captured_label.image = self.ft_frames[self.current_left_index]
             self.current_ft_array = self.multi_ft_arrays[self.current_left_index]
+
         if choice == "Fourier Transform":
             self._refresh_ft_display()
 
@@ -1121,7 +1245,7 @@ class App(ctk.CTk):
         """
         choice = self.recon_view_var.get()
 
-        if choice == "Phase Reconstruction ":
+        if choice == "Phase Reconstruction":
             idx = getattr(self, 'current_phase_index', 0)
             frame_list = getattr(self, 'phase_frames', [])
             array_list = getattr(self, 'phase_arrays', [])
@@ -1138,18 +1262,20 @@ class App(ctk.CTk):
                 self.processed_label.image = frame_list[idx]
                 self.current_amplitude_array = array_list[idx]
 
+    '''
     def show_options(self):
-     if hasattr(self, 'Options_menu') and self.Options_menu.winfo_ismapped():
-         self.Options_menu.grid_forget()
-         return
+        if hasattr(self, 'Options_menu') and self.Options_menu.winfo_ismapped():
+            self.Options_menu.grid_forget()
+            return
 
-     self.Options_menu = ctk.CTkOptionMenu(
-         self.buttons_frame,
-         values=["QPI", "Filters"],
-         command=self.choose_option,
-         width=270
-     )
-     self.Options_menu.grid(row=0, column=1, padx=4, pady=5, sticky='w')
+        self.Options_menu = ctk.CTkOptionMenu(
+        self.buttons_frame,
+        values=["QPI", "Filters"],
+        command=self.choose_option,
+        width=270
+        )
+        self.Options_menu.grid(row=0, column=1, padx=4, pady=5, sticky='w')
+    '''
 
     def choose_option(self, selected_option):
         if selected_option == "QPI":
@@ -1163,8 +1289,8 @@ class App(ctk.CTk):
 
     def _get_current_array(self, target: str) -> np.ndarray | None:
         """Return the ndarray that corresponds to *target*."""
-        if   target == "Hologram": return getattr(self, "current_holo_array",      None)
-        elif target == "Fourier Transform": return getattr(self, "current_ft_array",        None)
+        if target == "Hologram": return getattr(self, "current_holo_array", None)
+        elif target == "Fourier Transform": return getattr(self, "current_ft_array", None)
         elif target == "Amplitude": return getattr(self, "current_amplitude_array", None)
         elif target == "Phase": return getattr(self, "current_phase_array",     None)
         return None
@@ -1766,7 +1892,8 @@ class App(ctk.CTk):
         fourcc = cv2.VideoWriter_fourcc(*("mp4v" if path.lower().endswith(".mp4")
                                           else "XVID"))
         h, w = buf[0].shape[:2]
-        vw = cv2.VideoWriter(path, fourcc, 24, (w, h), isColor=True)
+        fps_to_use = getattr(self, "source_fps", 15.0)
+        vw = cv2.VideoWriter(path, fourcc, fps_to_use, (w, h), isColor=True)
 
         for f in buf:
             # ensure 3-channel for codecs that insist on colour
@@ -1777,8 +1904,6 @@ class App(ctk.CTk):
             vw.write(f_col)
         vw.release()
 
-        tk.messagebox.showinfo("Record", f"Video saved:\n{path}")
-
     def init_phase_compensation_frame(self):
         # Main container
         self.phase_compensation_frame = ctk.CTkFrame(self, corner_radius=8)
@@ -1788,13 +1913,14 @@ class App(ctk.CTk):
         self.pc_container.grid_propagate(False)
         self.pc_container.pack(fill="both", expand=True)
 
-        # Add scrollbar and canvas
+        # Scrollbar + canvas
         self.pc_scrollbar = ctk.CTkScrollbar(self.pc_container, orientation='vertical')
         self.pc_scrollbar.grid(row=0, column=0, sticky='ns')
 
         mode = ctk.get_appearance_mode()
         fg = self.phase_compensation_frame.cget("fg_color")
-        bg_col = fg[1] if isinstance(fg, (tuple, list)) and mode == "Dark" else fg[0] if isinstance(fg, (tuple, list)) else fg
+        bg_col = fg[1] if isinstance(fg, (tuple, list)) and mode == "Dark" else fg[0] if isinstance(fg, (
+        tuple, list)) else fg
 
         self.pc_canvas = ctk.CTkCanvas(
             self.pc_container,
@@ -1835,7 +1961,7 @@ class App(ctk.CTk):
 
         self.update_compensation_params()
 
-        # Combined Compensation + FT visualization panel
+        # Compensation + FT visualization panel
         self.filter_pc_frame = ctk.CTkFrame(
             self.phase_compensation_inner_frame,
             width=400,
@@ -1864,7 +1990,7 @@ class App(ctk.CTk):
         self.spatial_filter_var_pc = ctk.StringVar(value="Circular")
         self.filter_menu_pc = ctk.CTkOptionMenu(
             self.filter_pc_frame,
-            values=["Circular", "Manual Rectangular"],
+            values=["Circular", "Rectangular"],
             variable=self.spatial_filter_var_pc
         )
         self.filter_menu_pc.grid(row=1, column=1, padx=5, pady=5, sticky="w")
@@ -1927,13 +2053,15 @@ class App(ctk.CTk):
         )
         self.record_frame.grid(row=4, column=0, sticky="ew", pady=(2, 6))
         self.record_frame.grid_propagate(False)
-        for col in (0, 1, 2, 3):
+
+        # IMPORTANT: add an extra column (4) for the REC indicator
+        for col in (0, 1, 2, 3, 4):
             self.record_frame.columnconfigure(col, weight=1)
 
         ctk.CTkLabel(self.record_frame,
                      text="Record Options",
                      font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, columnspan=4, padx=10, pady=(10, 5), sticky="w"
+            row=0, column=0, columnspan=5, padx=10, pady=(10, 5), sticky="w"
         )
 
         ctk.CTkLabel(self.record_frame, text="Record").grid(
@@ -1958,6 +2086,18 @@ class App(ctk.CTk):
             command=self.stop_recording
         ).grid(row=1, column=3, padx=(0, 10), pady=(10, 5), sticky="ew")
 
+        # NEW: Create the "● REC" indicator label and keep it hidden until recording starts
+        self.record_indicator = ctk.CTkLabel(
+            self.record_frame,
+            text="● REC",
+            text_color="red",
+            font=ctk.CTkFont(weight="bold")
+        )
+        # Place it in the new column 4, aligned to the right
+        self.record_indicator.grid(row=1, column=4, padx=(0, 10), pady=(10, 5), sticky="e")
+        # Hide by default; start_record() will call grid() to show it
+        self.record_indicator.grid_remove()
+
         # Particle Tracking Panel
         self.particle_tracking_frame = ctk.CTkFrame(
             self.phase_compensation_inner_frame,
@@ -1975,7 +2115,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(weight="bold")
         ).grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 5), sticky="w")
 
-        # Filter method + Color filter (in same row)
+        # Filter method + Color filter row
         self.filterrow_frame = ctk.CTkFrame(self.particle_tracking_frame, fg_color="transparent")
         self.filterrow_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="w")
 
@@ -2050,18 +2190,11 @@ class App(ctk.CTk):
         self.phase_compensation_inner_frame.update_idletasks()
         self.pc_canvas.config(scrollregion=self.pc_canvas.bbox("all"))
 
-        # Final canvas update
+        # (Second update is fine; some UIs prefer a second pass)
         self.phase_compensation_inner_frame.update_idletasks()
         self.pc_canvas.config(scrollregion=self.pc_canvas.bbox("all"))
 
     def run_tracking(self):
-        print("Tracking started with parameters:")
-        print("Filter:", self.filter_method_var.get())
-        print("Min Area:", self.min_area_entry.get())
-        print("Max Area:", self.max_area_entry.get())
-        print("Blob Color:", self.blob_color_entry.get())
-        print("Use color filtering:", self.use_color_filter_var.get())
-        print("Kalman P/Q/R:", self.kalman_p_entry.get(), self.kalman_q_entry.get(), self.kalman_r_entry.get())
 
         if not hasattr(self, "cap") or self.cap is None:
             tk.messagebox.showwarning("No Video", "Please load a video first.")
@@ -2104,10 +2237,6 @@ class App(ctk.CTk):
             traceback.print_exc()
 
     def show_dataframe_in_table(self, df, title="Coordinates"):
-        if df.empty:
-            print("No data to display in the table.")
-            return
-
         table_win = tk.Toplevel(self)
         table_win.title(title)
         table_win.geometry("800x400")
@@ -2149,7 +2278,6 @@ class App(ctk.CTk):
         self.is_playing = False
         self.play_button.configure(text="▶ Play")
         self.stop_compensation()
-
 
         # If mode is camera / video
         if self.source_mode == "camera":
@@ -2319,7 +2447,6 @@ class App(ctk.CTk):
         return v * factors.get(unit, 1.0)
 
     def _set_unit_in_label(self, lbl, unit):
-
         base = lbl.cget("text").split("(")[0].strip()
         lbl.configure(text=f"{base} ({unit})")
 
@@ -2377,36 +2504,40 @@ class App(ctk.CTk):
 
         return fx, fy
 
-    def spatialFilteringCF(self, field, height, width, filter_type: str = "Circular", manual_coords=None, show_ft_and_filter: bool = False):
-        ft_shift  = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(field)))
+    def spatialFilteringCF(self, field, height, width, filter_type: str = "Circular", show_ft_and_filter: bool = False):
+        """
+        Apply spatial filtering in frequency domain for holographic reconstruction.
+
+        Args:
+            field: Input hologram field
+            height: Image height
+            width: Image width
+            filter_type: "Circular" or "Rectangular" filtering
+            show_ft_and_filter: Show OpenCV windows for debugging
+
+        Returns:
+            tuple: (filtered_ft, fy_array, fx_array)
+        """
+        ft_shift = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(field)))
         magnitude = np.abs(ft_shift)
         # Keep the magnitude so the pop-up can display it
         self.arr_ft = magnitude
-        # Ask for the manual rectangle *before* optimisation -
-        if filter_type == "Manual Rectangular" and manual_coords is None:
-            manual_coords = self.draw_manual_rectangle()
-            if manual_coords is None:
-                filter_type = "Circular"
-        if filter_type == "Manual Rectangular" and manual_coords is not None:
-            self.manual_filter_coords = manual_coords
-
         fy0, fx0 = np.unravel_index(np.argmax(magnitude), magnitude.shape)
         holo = np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(ft_shift)))
 
-        Y, X = np.meshgrid(np.arange(height) - height/2,
-                           np.arange(width) - width /2,
+        Y, X = np.meshgrid(np.arange(height) - height / 2,
+                           np.arange(width) - width / 2,
                            indexing="ij")
         self.m_mesh, self.n_mesh = X, Y
         self.k = 2 * math.pi / self.lambda_um
 
         fx, fy = self._search_fx_fy(
             holo, fx0, fy0,
-            width/2, height/2,
+            width / 2, height / 2,
             self.lambda_um, width, height,
             self.dx_um, self.dy_um,
             self.k, X, Y,
             G_initial=3)
-
         self.fx, self.fy = fx, fy
 
         # Mask & filtering
@@ -2424,26 +2555,20 @@ class App(ctk.CTk):
         # Fallback if the mask wiped everything
         if mag_masked[fy_peak, fx_peak] == 0:
             fy_peak, fx_peak = int(fy), int(fx)
-
         fy, fx = fy_peak, fx_peak
 
-        # Radius for circular ROI
+        # Radius for ROI (same for both circular and rectangular)
         d = np.hypot(fy - cy, fx - cx)
         radius = d / 3 if d > 1e-9 else max(rr, 10)
 
-        mask = np.zeros((height, width), dtype=np.uint8)
-
+        # Create mask based on filter type
         if filter_type == "Circular":
-            mask = self.circularMask(
-                height, width, radius, fy, fx).astype(np.uint8)
-
-        elif filter_type == "Manual Rectangular" and manual_coords is not None:
-            x1, y1, x2, y2 = manual_coords
-            mask[y1:y2, x1:x2] = 1
-
+            mask = self.circularMask(height, width, radius, fy, fx).astype(np.uint8)
+        elif filter_type == "Rectangular":
+            mask = self.rectangularMask(height, width, radius, fy, fx).astype(np.uint8)
         else:
-            mask = self.circularMask(
-                height, width, radius, fy, fx).astype(np.uint8)
+            # Default to circular
+            mask = self.circularMask(height, width, radius, fy, fx).astype(np.uint8)
 
         filtered_ft = ft_shift * mask
 
@@ -2454,59 +2579,72 @@ class App(ctk.CTk):
                    np.log1p(np.abs(filtered_ft)).max() * 255).astype(np.uint8)
 
         self.current_ft_unfiltered_array = log_unf
-        self.current_ft_filtered_array   = log_fil
+        self.current_ft_filtered_array = log_fil
+
         pil_unf = Image.fromarray(log_unf)
         pil_fil = Image.fromarray(log_fil)
+
         self.current_ft_unfiltered_tk = self._preserve_aspect_ratio(
             pil_unf, self.viewbox_width, self.viewbox_height)
-        self.current_ft_filtered_tk   = self._preserve_aspect_ratio(
+        self.current_ft_filtered_tk = self._preserve_aspect_ratio(
             pil_fil, self.viewbox_width, self.viewbox_height)
 
         if show_ft_and_filter:
             cv2.imshow("FT – unfiltered", log_unf)
-            cv2.imshow("FT – filtered",   log_fil)
+            cv2.imshow("FT – filtered", log_fil)
             cv2.waitKey(1)
 
         # Return the *updated* carrier coordinates
         return filtered_ft, np.array([fy]), np.array([fx])
 
-    # Minor tweak: circularMask returns a boolean mask
+    # Rectangular Mask
+    def rectangularMask(self, height: int, width: int, radius: float, centY: int, centX: int) -> np.ndarray:
+        """
+        Create a rectangular mask with center at (centY, centX) and size based on radius.
+        The rectangle will have width = 2*radius and height = 2*radius (square).
+        """
+        # Convert center coordinates to integers
+        centY = int(round(centY))
+        centX = int(round(centX))
+        half_size = int(round(radius))
+
+        # Calculate rectangle boundaries
+        half_size = int(radius)
+
+        y1 = max(0, centY - half_size)
+        y2 = min(height, centY + half_size)
+        x1 = max(0, centX - half_size)
+        x2 = min(width, centX + half_size)
+
+        # Create mask
+        mask = np.zeros((height, width), dtype=bool)
+        mask[y1:y2, x1:x2] = True
+
+        return mask
+
+    # Circular Mask
     def circularMask(self, height: int, width: int, radius: float, centY: int, centX: int) -> np.ndarray:
         Y, X = np.ogrid[:height, :width]
         return ((Y - centY) ** 2 + (X - centX) ** 2) <= radius ** 2
-
-    def _process_first_frame(self, frame: np.ndarray) -> None:
-        """First frame → SHPC only (Vortex removed)."""
-        h, w = frame.shape
-        ftype = getattr(self, "selected_filter_type", "Circular")
-        filtered_ft, fy_arr, fx_arr = self.spatialFilteringCF(
-            frame, h, w, filter_type=ftype, manual_coords=None
-        )
-        self.fx, self.fy = fx_arr[0], fy_arr[0]
-        self._reconstruct_and_update_views(frame, filtered_ft)
-        self.first_frame_done = True
 
     def _process_next_frame(self, frame: np.ndarray) -> None:
         """All subsequent frames → SHPC refinement."""
         h, w = frame.shape
         ft_raw = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(frame)))
 
-        ftype = getattr(self, "selected_filter_type", "Circular")
-        if ftype == "Manual Rectangular" and hasattr(self, "manual_filter_coords"):
-            x1, y1, x2, y2 = self.manual_filter_coords
-            mask = np.zeros((h, w), dtype=bool)
-            mask[y1:y2, x1:x2] = True
-            ft_filt = ft_raw * mask
-        else:
-            yy, xx = np.ogrid[:h, :w]
-            rad = 0.08 * min(h, w)
-            mask = ((yy - self.fy) ** 2 + (xx - self.fx) ** 2) <= rad**2
-            ft_filt = ft_raw * mask
+        ftype = self.spatial_filter_var_pc.get().strip()
+        radius = 0.08 * min(h, w)
+        if ftype == "Rectangular":
+            mask = self.rectangularMask(h, w, radius, self.fy, self.fx)
+        else:  # default or "Circular"
+            mask = self.circularMask(h, w, radius, self.fy, self.fx)
+
+        ft_filt = ft_raw * mask
 
         # Refine carrier
         holo = np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(ft_filt)))
         self.fx, self.fy = self._search_fx_fy(
-            holo, self.fx, self.fy, w/2, h/2,
+            holo, self.fx, self.fy, w / 2, h / 2,
             self.lambda_um, w, h,
             self.dx_um, self.dy_um,
             self.k, self.m_mesh, self.n_mesh, G_initial=1
@@ -2521,16 +2659,23 @@ class App(ctk.CTk):
                    np.log1p(np.abs(ft_filt)).max() * 255).astype(np.uint8)
 
         self.current_ft_unfiltered_array = log_unf
-        self.current_ft_filtered_array   = log_fil
+        self.current_ft_filtered_array = log_fil
         self.current_ft_unfiltered_tk = self._preserve_aspect_ratio(
             Image.fromarray(log_unf), self.viewbox_width, self.viewbox_height)
-        self.current_ft_filtered_tk  = self._preserve_aspect_ratio(
+        self.current_ft_filtered_tk = self._preserve_aspect_ratio(
             Image.fromarray(log_fil), self.viewbox_width, self.viewbox_height)
         self._refresh_ft_display()
 
-    def _process_vortex_frame(self, *_, **__) -> None:
-        """Deprecated – SHPC is now the sole compensation method."""
-        pass
+    def _process_first_frame(self, frame: np.ndarray) -> None:
+        """First frame → SHPC only (Vortex removed)."""
+        h, w = frame.shape
+        ftype = getattr(self, "selected_filter_type", "Circular")
+        filtered_ft, fy_arr, fx_arr = self.spatialFilteringCF(
+            frame, h, w, filter_type=ftype
+        )
+        self.fx, self.fy = fx_arr[0], fy_arr[0]
+        self._reconstruct_and_update_views(frame, filtered_ft)
+        self.first_frame_done = True
 
     def _reconstruct_and_update_views(
         self,
@@ -2542,7 +2687,7 @@ class App(ctk.CTk):
         push the right thumbnails to the two viewers, and (if active)
         append the frame to the current recording buffer.
         """
-        # —— basic geometry & cached carrier ——
+        # Basic geometry & cached carrier
         M, N = hologram_gray.shape[1], hologram_gray.shape[0]
         fx = self.fx[0] if isinstance(self.fx, np.ndarray) else self.fx
         fy = self.fy[0] if isinstance(self.fy, np.ndarray) else self.fy
@@ -2609,7 +2754,7 @@ class App(ctk.CTk):
         self.amplitude_arrays = [amp_u8]
         self.phase_arrays = [phase_u8]
 
-        # —— push to viewers ——
+        # Push to viewers
         if self.holo_view_var.get() == "Hologram":
             self.captured_label.configure(image=tk_holo)
         else:
@@ -2642,20 +2787,22 @@ class App(ctk.CTk):
         else:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # frame_bgr
+        # Dark Frame
         if gray.mean() < 5:
             print("[WARN] Frame negro – skip")
             self.after(20, self._update_realtime)
             return
 
+        # Frames one or two
         if not self.first_frame_done:
             self._process_first_frame(gray)
         else:
             self._process_next_frame(gray)
 
+        # call next frame
         self.after(20, self._update_realtime)
 
-        # Wavelength
+        # parameters
         try:
             l_txt = self.wave_label_pc_entry.get()
             self.lambda_um = self.get_value_in_micrometers(l_txt, self.wavelength_unit)
@@ -2665,7 +2812,6 @@ class App(ctk.CTk):
             tk.messagebox.showwarning("Parameters", f"Bad parameters: {e}")
             return
 
-        # Pixel pitches
         try:
             dx_txt = self.pitchx_label_pc_entry.get()
             self.dx_um = self.get_value_in_micrometers(dx_txt, self.pitch_x_unit)
@@ -2676,15 +2822,12 @@ class App(ctk.CTk):
         except ValueError as e:
             tk.messagebox.showwarning("Parameters", f"Bad parameters: {e}")
             return
-        self.selected_filter_type = self.spatial_filter_var_pc.get().strip()
 
-        # Basic pre-computations
+        # filter
+        self.selected_filter_type = self.spatial_filter_var_pc.get().strip()
         self.wavelength = self.lambda_um
         self.dxy = (self.dx_um + self.dy_um) / 2.0
         self.k = 2 * math.pi / self.lambda_um
-        self.realtime_active = True
-        self.first_frame_done = False
-        self._update_realtime()
 
     def stop_realtime_stream(self) -> None:
         """Bind to any Stop/Close button."""
