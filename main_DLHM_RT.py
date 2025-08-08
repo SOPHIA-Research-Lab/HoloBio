@@ -22,8 +22,11 @@ import cv2
 
 class App(ctk.CTk):
 
-    
     def __init__(self):
+        # ── runtime state machine ────────────────────────────────────
+        self.acquisition_active        = False   # webcam feed on/off
+        self.compensating              = False   # live reconstruction on/off
+        self.was_compensating_on_stop  = False   # remember state for Play
         ctk.set_appearance_mode("Light")
         super().__init__()
         if not hasattr(tGUI, "ImageTk"):
@@ -177,11 +180,7 @@ class App(ctk.CTk):
 
         # Phase ( _r_ )
         self.manual_lowpass_r_var = ctk.BooleanVar(self, value=False)
-
-        #self._add_amplitude_filter_vars()
-        self.capture = Process(target=capture, args=(self.queue_manager,))
-        self.capture.start()
-   
+ 
         # recording
         self.is_recording = False
         self.record_type = None
@@ -196,20 +195,29 @@ class App(ctk.CTk):
         self.after(0, self.after_idle_setup)
         self.after(0, self.draw)
         self._init_data_containers()
+    
+    def _grab_live_frame(self) -> np.ndarray:
+ 
+        if hasattr(self, "last_preview_gray") and self.last_preview_gray is not None:
+            return self.last_preview_gray.copy()
+        if hasattr(self, "current_holo_array") and self.current_holo_array is not None:
+            return self.current_holo_array.copy()
+        return self.arr_c.copy()
 
 
     def update_inputs(self, process: str = ''):
-        # We won't do a real capture pipeline, so only the reconstruction matters
+ 
         if process == 'capture' or not process:
-            self.capture_input['path'] = self.file_path
-            self.capture_input['reference path'] = self.ref_path
-            self.capture_input['settings'] = self.settings
-            self.capture_input['filters'] = (self.filters_c, self.filter_params_c)
-            self.capture_input['filter'] = True
+            self.capture_input['path']            = self.file_path
+            self.capture_input['reference path']  = self.ref_path
+            self.capture_input['settings']        = self.settings
+            self.capture_input['filters']         = (self.filters_c, self.filter_params_c)
+            self.capture_input['filter']          = True
 
-        if process in ("reconstruction", ""):
+        if process in ('reconstruction', ''):
+            holo = self._grab_live_frame()             
             self.recon_input = {
-                "image":        self.arr_c,
+                "image":        holo,
                 "filters":      (self.filters_r, self.filter_params_r),
                 "filter":       True,
                 "algorithm":    self.algorithm_var.get(),
@@ -222,7 +230,6 @@ class App(ctk.CTk):
                 "squared":      self.square_field.get(),
                 "phase":        self.Processed_Image_r.get()
             }
-
     
     def update_outputs(self, process: str = ""):
         # capture side
@@ -254,16 +261,6 @@ class App(ctk.CTk):
             if m is not None:
                 m.set(caption)
 
-    def _show_popup_image(self, arr: np.ndarray, title: str = "Speckle filtered"):
-     """Show a static image in a non‑blocking Toplevel window."""
-     win = tk.Toplevel(self)
-     win.title(title)
-     im  = Image.fromarray(arr)
-     tk_img = ImageTk.PhotoImage(im)
-     lbl = tk.Label(win, image=tk_img)
-     lbl.image = tk_img     # keep a reference
-     lbl.pack()
-
     def _init_data_containers(self) -> None:
         """
         Creates all attributes that tools_GUI relies on, with safe defaults.
@@ -288,7 +285,6 @@ class App(ctk.CTk):
         self.phase_frames              = []
         self.current_phase_index       = 0
 
-        # *** NUEVO BLOQUE – INTENSIDADES ***
         self.intensity_arrays          = []
         self.original_intensity_arrays = []
         self.intensity_frames          = []
@@ -306,96 +302,208 @@ class App(ctk.CTk):
         self.filtered_amp_array   = None
         self.filtered_phase_array = None
     
+    def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ImageTk.PhotoImage:
+     max_w, max_h = self.viewbox_width, self.viewbox_height
+     orig_w, orig_h = pil_image.size
 
-    def _map_ui_to_mpl_cmap(self, ui_name: str) -> str:
-        """Translate the UI name into a valid Matplotlib identifier."""
-        table = {
-            "Viridis":  "viridis",
-            "Plasma":   "plasma",
-            "Inferno":  "inferno",
-            "Magma":    "magma",
-            "Cividis":  "cividis",
-            "Hot":      "hot",
-            "Cool":     "cool",
-            "Wistia":   "Wistia",   # needs capital “W”
-        }
-        return table.get(ui_name, ui_name.lower())
+     if orig_w <= max_w and orig_h <= max_h:
+         resized = pil_image
+     else:
+         atio_w = max_w / float(orig_w)
+         ratio_h = max_h / float(orig_h)
+         scale_factor = min(ratio_w, ratio_h)
+         new_w = int(orig_w * scale_factor)
+         new_h = int(orig_h * scale_factor)
+         resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+     return ImageTk.PhotoImage(resized)
 
-    def _apply_ui_colormap(self, arr8u: np.ndarray, ui_name: str) -> np.ndarray:
+    def _get_left_viewbox_size(self) -> tuple[int, int]:
         """
-        Return *arr8u* converted to RGB with the UI-selected colormap.
-        If ui_name is “Original” or the array is already RGB, it is
-        returned unchanged.
+        Return the locked width/height for the left viewer box.
+        Uses a cached size updated by the resize handler to avoid
+        feedback loops (image -> label size -> image).
         """
-        if ui_name == "Original" or arr8u.ndim == 3:
-            return arr8u
+        # Use cached lock if available (set by _on_left_view_resize / init)
+        if hasattr(self, "_left_box") and self._left_box:
+            w, h = self._left_box
+            if w > 1 and h > 1:
+                return int(w), int(h)
 
-        from matplotlib import colormaps as mpl_cmaps
-        cmap = mpl_cmaps[self._map_ui_to_mpl_cmap(ui_name)]
+        # Fallback: query widget geometry or defaults
+        w = h = 0
+        lbl = getattr(self, "captured_label", None)
+        if lbl is not None:
+            try:
+                w = int(lbl.winfo_width()) or int(lbl.winfo_reqwidth())
+                h = int(lbl.winfo_height()) or int(lbl.winfo_reqheight())
+            except Exception:
+                pass
+        if w <= 1 or h <= 1:
+            w, h = int(getattr(self, "viewbox_width", 400)), int(getattr(self, "viewbox_height", 300))
+        return max(1, w), max(1, h)
 
-        norm = arr8u.astype(np.float32) / 255.0
-        rgb  = (cmap(norm)[..., :3] * 255).astype(np.uint8)
-        return rgb
-
-    # ------------------------------------------------------------------
-    # 2.  Safe replacement for tools_GUI.apply_matplotlib_colormap (new)
-    # ------------------------------------------------------------------
-    def _safe_apply_matplotlib_colormap(self,
-                                        arr8u : np.ndarray,
-                                        ui_name: str):
+    def _get_right_viewbox_size(self) -> tuple[int, int]:
         """
-        Drop-in replacement for the old helper.
-        Returns a PIL.Image – never crashes if the array is already RGB.
+        Returns the current width/height (in px) available to draw the
+        right viewer (phase / amplitude). Mirrors the left helper.
         """
-        rgb = self._apply_ui_colormap(arr8u, ui_name)
+        w = h = 0
+        lbl = getattr(self, "processed_label", None)
+        if lbl is not None:
+            w = int(lbl.winfo_width()) or int(lbl.winfo_reqwidth())
+            h = int(lbl.winfo_height()) or int(lbl.winfo_reqheight())
+        if w <= 1 or h <= 1:
+            w, h = int(getattr(self, "viewbox_width", 400)), int(getattr(self, "viewbox_height", 300))
+        return max(1, w), max(1, h)
 
-        # guarantee an RGB PIL image
-        if rgb.ndim == 2:                       # greyscale → stack channels
-            rgb = np.stack([rgb]*3, axis=-1)
+    def _fit_left_image(self, pil_image: Image.Image) -> ctk.CTkImage:
+        """
+        Return a CTkImage scaled to fully fit inside the left viewer box
+        while preserving aspect ratio. Never upsizes above native resolution.
+        """
+        max_w, max_h = self._get_left_viewbox_size()
+        ow, oh = pil_image.size
 
-        from PIL import Image
-        return Image.fromarray(rgb.astype(np.uint8), mode="RGB")
+        # compute contain scale; clamp to 1.0 to avoid upscaling shimmer
+        scale = min(max_w / float(ow), max_h / float(oh), 1.0)
+        new_w = max(1, int(ow * scale))
+        new_h = max(1, int(oh * scale))
 
+        # Minor stabilizer: snap to even pixels to avoid ±1px toggling
+        if new_w > 4: new_w -= new_w % 2
+        if new_h > 4: new_h -= new_h % 2
 
-    def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ctk.CTkImage:
-        """Return a CTkImage letterboxed to (viewbox_width, viewbox_height)."""
-        max_w, max_h = self.viewbox_width, self.viewbox_height
-        orig_w, orig_h = pil_image.size
+        return ctk.CTkImage(light_image=pil_image, size=(new_w, new_h))
 
-        # Scale down/up while preserving aspect ratio
-        ratio_w = max_w / float(orig_w)
-        ratio_h = max_h / float(orig_h)
-        scale_factor = min(ratio_w, ratio_h)
-        new_w = int(orig_w * scale_factor)
-        new_h = int(orig_h * scale_factor)
+    def _fit_right_image(self, pil_image: Image.Image) -> ctk.CTkImage:
+        """
+        Same as _fit_left_image but for the right viewer.
+        """
+        max_w, max_h = self._get_right_viewbox_size()
+        ow, oh = pil_image.size
+        scale = min(max_w / float(ow), max_h / float(oh), 1.0)
+        new_size = (max(1, int(ow * scale)), max(1, int(oh * scale)))
+        return ctk.CTkImage(light_image=pil_image, size=new_size)
 
-        # Letterbox
-        final_img = Image.new("RGB", (max_w, max_h), color=(0, 0, 0))
-        resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        offset_x = (max_w - new_w) // 2
-        offset_y = (max_h - new_h) // 2
-        final_img.paste(resized, (offset_x, offset_y))
+    def _init_viewboxes(self, shape: str = "square",
+                        square_size: int = 520,
+                        landscape_size: tuple[int, int] = (640, 420)) -> None:
+        """
+        Initialize the shared viewbox size and the initial black placeholders.
+        shape: "square" | "landscape"
+        This keeps compatibility with functions_GUI.build_two_views_panel(),
+        which reads self.viewbox_width / self.viewbox_height.
+        """
+        if shape == "landscape":
+            w, h = landscape_size
+        else:  # default: square
+            w = h = square_size
 
-        # Return as CTkImage with the exact desired size
-        return ctk.CTkImage(light_image=final_img, size=(max_w, max_h))
+        self.viewbox_width, self.viewbox_height = w, h
+
+        # Black placeholders with matching aspect
+        self.arr_c = np.zeros((h, w), dtype=np.uint8)
+        self.arr_r = np.zeros((h, w), dtype=np.uint8)
+
+        im_c = Image.fromarray(self.arr_c)
+        im_r = Image.fromarray(self.arr_r)
+
+        # CTkImage sized exactly to the viewboxes so the “black boxes”
+        # start square/landscape instead of tall/portrait
+        self.img_c = ctk.CTkImage(light_image=im_c, size=(w, h))
+        self.img_r = ctk.CTkImage(light_image=im_r, size=(w, h))
+
+        # Keep the usual working copies in-sync
+        self.arr_c_orig = self.arr_c.copy()
+        self.arr_r_orig = self.arr_r.copy()
+        self.arr_c_view = self.arr_c.copy()
+        self.arr_r_view = self.arr_r.copy()
     
-
     def init_viewing_frame(self) -> None:
+        # Pick the startup shape here:
+        #   "square"     
+        #   "landscape"  
+        self._init_viewboxes(shape="landscape")   
+
         self.init_navigation_frame()
+
         # placeholders so the helper modules have something to draw
         self.holo_views  = [("init", self.img_c)]
         self.recon_views = [("init", self.img_r)]
+
         # toolbar
         fGUI.build_toolbar(self)
-        # ── NEW: lock the Tools menu ───────────────────────
+
+        # lock the Tools menu (unchanged behavior)
         if hasattr(self, "tools_menu"):
             try:
                 self.tools_menu.configure(state="disabled")
             except Exception:
                 pass
+
         fGUI.build_two_views_panel(self)
 
+    def _bind_view_resize_events(self) -> None:
+        """
+        Bind <Configure> on the image labels so any resize of the panes
+        triggers a re-fit of the currently displayed images.
+        """
+        if hasattr(self, "captured_label"):
+            self.captured_label.bind("<Configure>", self._on_left_view_resize)
+        if hasattr(self, "processed_label"):
+            self.processed_label.bind("<Configure>", self._on_right_view_resize)
 
+    def _on_left_view_resize(self, _event=None):
+        """Refit current left image (hologram/FT) to the new box size."""
+        if getattr(self, "_in_left_resize", False):
+            return
+        self._in_left_resize = True
+        try:
+            # 1) update cached box from the event when available
+            if _event is not None and hasattr(_event, "width") and hasattr(_event, "height"):
+                new_w, new_h = max(1, int(_event.width)), max(1, int(_event.height))
+                # avoid micro-oscillations (±1 px)
+                old = getattr(self, "_left_box", (0, 0))
+                if abs(new_w - old[0]) + abs(new_h - old[1]) >= 2:
+                    self._left_box = (new_w, new_h)
+
+            # 2) enforce label size to the locked box
+            w, h = self._get_left_viewbox_size()
+            if hasattr(self, "captured_label"):
+                try:
+                    self.captured_label.configure(width=w, height=h)
+                except Exception:
+                    pass
+
+            # 3) refit whatever is currently displayed
+            show_holo = hasattr(self, "holo_view_var") and self.holo_view_var.get() == "Hologram"
+            if show_holo:
+                src_arr = getattr(self, "arr_c_view", None)
+            else:
+                # prefer the last computed FT if present; otherwise compute on the fly
+                src_arr = getattr(self, "_last_ft_display", None) or (
+                    self._generate_ft_display(getattr(self, "arr_c_view", self.arr_c), log_scale=True)
+                )
+
+            if src_arr is None:
+                return
+
+            pil = Image.fromarray(src_arr)
+            self.img_c = self._fit_left_image(pil)
+            self.captured_label.configure(image=self.img_c)
+            self.captured_label.image = self.img_c
+        finally:
+            self._in_left_resize = False
+
+    def _on_right_view_resize(self, _event=None):
+        """Refit current right image (phase/amplitude) to the new box size."""
+        src_arr = getattr(self, "arr_r_view", None)
+        if src_arr is None:
+            return
+        pil = Image.fromarray(src_arr)
+        self.img_r = self._fit_right_image(pil)
+        self.processed_label.configure(image=self.img_r)
+        self.processed_label.image = self.img_r
 
     def _ensure_frame_lists_length(self) -> None:
         """Pad every *…_frames* list with a 1 × 1 dummy so index
@@ -411,18 +519,235 @@ class App(ctk.CTk):
         _pad(self.phase_frames,      len(self.phase_arrays))
         _pad(self.intensity_frames,  len(self.intensity_arrays))
         _pad(self.ft_frames,         len(self.ft_arrays))       
-
-
-    # Values that must appear in the “Load” drop-down
+ 
     def get_load_menu_values(self):
-        return ["Load image", "Select reference", "Reset reference"]
+        return ["Init Camera", "Select reference", "Reset reference"]
 
-    # When the user picks something in the drop-downs:
-    def _on_load_select(self, choice: str):
-        {"Load image":       self.selectfile,
+    def _on_load_select(self, choice: str):         
+        {"Init Camera":     self._init_camera_and_preview,
          "Select reference": self.selectref,
          "Reset reference":  self.resetref}.get(choice, lambda: None)()
-        self.after(100, self._reset_toolbar_labels)   # ← NEW
+        self.after(100, self._reset_toolbar_labels)
+
+    def _find_available_cameras(self, max_idx: int = 10) -> list[int]:
+        """Return indices of cameras that actually open."""
+        avail = []
+        use_flag = cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_V4L2
+
+        for idx in range(max_idx):
+           cap = cv2.VideoCapture(idx, use_flag)
+           if not cap.isOpened():                       # retry with “default”
+               cap = cv2.VideoCapture(idx)
+           if cap.isOpened():
+               avail.append(idx)
+               cap.release()
+        return avail
+    
+    def _show_camera_error_once(self, message: str) -> None:
+        """Display *message* only the first time the condition happens."""
+        try:
+            if not getattr(self, "_camera_error_shown", False):
+                tk.messagebox.showinfo("Camera", message)
+                self._camera_error_shown = True
+        except Exception:
+            # fall back to console if Tk is not ready
+            print(f"[Camera] {message}")
+
+    def _init_camera(self) -> cv2.VideoCapture | None:
+        """Open the first working webcam and keep a handle in *self.cap*."""
+        import platform
+        self.cap = None
+        self.selected_camera_index = None
+        self.realtime_active = False
+    
+        avail = self._find_available_cameras()
+        if not avail:
+            self._show_camera_error_once("No camera detected – realtime disabled.")
+            return None
+    
+        idx = avail[0]
+        if os.name == "nt":                 # Windows back-end order
+            backends = (cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY)
+        else:                               # Linux / macOS
+            backends = (cv2.CAP_V4L2, cv2.CAP_ANY)
+    
+        for api in backends:
+            cap = cv2.VideoCapture(idx, api)
+            if cap.isOpened():
+                break
+        else:
+            self._show_camera_error_once(f"Could not open camera index {idx}.")
+            return None
+    
+        ok, first = cap.read()
+        if not ok:
+            cap.release()
+            self._show_camera_error_once("Camera opened but delivers no frames.")
+            return None
+    
+        # ---- success ----
+        self.cap = cap
+        self.selected_camera_index = idx
+        self.first_frame_done = False
+        self.video_buffer_rec = []
+        self.video_buffer_raw = []
+        self.start_time_fps = time.time()
+        self.frame_counter_fps = 0
+    
+        if not getattr(self, "_camera_success_shown", False):
+            tk.messagebox.showinfo(
+                "Camera",
+                f"Using device index {idx} – resolution {first.shape[1]}×{first.shape[0]}"
+            )
+            self._camera_success_shown = True
+    
+        return self.cap
+    
+    def _ensure_camera(self) -> bool:
+        return getattr(self, "cap", None) is not None and self.cap.isOpened()
+
+    def start_preview_stream(self) -> None:
+        """Start (or re-start) the GUI webcam preview loop."""
+        if not self._ensure_camera():
+            tk.messagebox.showerror("Camera error", "No active camera was found.")
+            return
+
+        self.preview_active = True
+
+        # Avoid multiple overlapping loops.
+        if hasattr(self, "_preview_after_id") and self._preview_after_id:
+            try:
+                self.after_cancel(self._preview_after_id)
+            except Exception:
+                pass
+            self._preview_after_id = None
+
+        # Always (re)kick the loop to guarantee continuous streaming.
+        self._preview_after_id = self.after(0, self._update_preview)
+
+    def stop_preview_stream(self) -> None:
+        """Stop the GUI webcam preview loop without releasing the camera."""
+        self.preview_active = False
+        if hasattr(self, "_preview_after_id") and self._preview_after_id:
+            try:
+                self.after_cancel(self._preview_after_id)
+            except Exception:
+                pass
+            self._preview_after_id = None
+
+    def _on_stop(self):
+        """Freeze BOTH acquisition and compensation and stop the preview loop cleanly."""
+        # Remember whether compensation was on, but stop it now.
+        self.was_compensating_on_stop = self.compensating
+        self.compensating = False
+
+        # Stop capture flags.
+        self.acquisition_active = False
+        self.preview_active = False
+
+        # Cancel any scheduled preview tick so the loop truly stops.
+        if hasattr(self, "_preview_after_id") and self._preview_after_id:
+            try:
+                self.after_cancel(self._preview_after_id)
+            except Exception:
+                pass
+            self._preview_after_id = None
+
+    def _on_play(self):
+        """
+        Resume ONLY the live camera preview (hologram).
+        Reconstruction does NOT resume automatically; press Compensate again.
+        """
+        # Ensure we have a camera; (re)open if needed.
+        if not self._ensure_camera():
+            self._init_camera_and_preview()
+            return
+
+        # Only resume preview; keep compensation OFF.
+        self.acquisition_active = True
+        self.preview_active = True
+        self.compensating = False
+
+        # Kick the preview loop immediately (in case it was idle).
+        self.start_preview_stream()
+
+    def _update_preview(self) -> None:
+        """
+        Grabs frames from the webcam and updates the left viewer.
+        Always scales to fit the widget so the image is never cropped.
+        """
+        try:
+            if not getattr(self, "preview_active", False):
+                return
+            if not self._ensure_camera():
+                return
+
+            ok, frame_bgr = self.cap.read()
+            if not ok:
+                return
+
+            # FPS (EMA)
+            now = time.time()
+            last = getattr(self, "_last_c_time", None)
+            if last is not None:
+                inst = 1.0 / max(now - last, 1e-6)
+                ema  = 0.85 * getattr(self, "_c_fps_ema", 0.0) + 0.15 * inst
+                self._c_fps_ema = ema
+                self.c_fps = round(ema, 1)
+            self._last_c_time = now
+
+            gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+
+            # Optional reference subtraction
+            if self.ref_path:
+                ref = cv2.imread(self.ref_path, cv2.IMREAD_GRAYSCALE)
+                if ref is not None and ref.shape == gray.shape:
+                    gray = cv2.subtract(gray, ref)
+
+            # Cache raw & FT
+            self.last_preview_gray = gray
+            ft_uint8 = self._compute_ft(gray)
+            self.last_preview_ft = ft_uint8
+
+            # Keep app-level arrays in sync with the live stream
+            self.arr_c_orig = gray
+            self.arr_c_view = self._run_filters_pipeline(gray, use_left_side=True)
+
+            # Build images that FIT the visible box (no cropping)
+            show_holo = hasattr(self, "holo_view_var") and self.holo_view_var.get() == "Hologram"
+            if show_holo:
+                self.img_c = self._fit_left_image(Image.fromarray(self.arr_c_view))
+                self.captured_label.configure(image=self.img_c)
+                self.captured_label.image = self.img_c
+            else:
+                ft_img = self._fit_left_image(Image.fromarray(ft_uint8))
+                self.captured_label.configure(image=ft_img)
+                self.captured_label.image = ft_img
+
+            # Update caches used by navigation/helpers
+            self.hologram_frames   = [self.img_c]
+            self.multi_holo_arrays = [self.arr_c_view]
+            self.ft_frames         = [self._fit_left_image(Image.fromarray(ft_uint8))]
+            self.ft_arrays         = [ft_uint8]
+            self.current_left_index = 0
+            self.current_ft_index   = 0
+
+        finally:
+            if getattr(self, "preview_active", False):
+                self._preview_after_id = self.after(20, self._update_preview)
+            else:
+                self._preview_after_id = None
+
+    def _pick_preferred_camera(self, avail: list[int]) -> int | None:
+        """Right now: just grab the first working index."""
+        return avail[0] if avail else None
+
+    def _init_camera_and_preview(self) -> None:
+        """(Re)open camera and start the preview stream."""
+        self._init_camera()
+        if self.cap and self.cap.isOpened():
+            self.acquisition_active = True
+            self.start_preview_stream()
 
     def _on_tools_select(self, choice: str):
         if choice == "Filters":
@@ -445,7 +770,6 @@ class App(ctk.CTk):
         ctk.set_appearance_mode(mode)
         self._sync_canvas_and_frame_bg()
 
-
     def _compute_ft(self, arr: np.ndarray) -> np.ndarray:
         """Returns log-magnitude FT (uint8) of *arr*."""
         f  = np.fft.fftshift(np.fft.fft2(arr.astype(np.float32)))
@@ -453,37 +777,29 @@ class App(ctk.CTk):
         mag = (mag / mag.max() * 255).astype(np.uint8)
         return mag
 
-
     def update_left_view(self):
         """
-        Uses the Fourier-transform image prepared by the background
-        process instead of computing a fresh FFT in the GUI thread.
+        Refresh left viewer (Hologram or Fourier Transform) and
+        always scale the image to fully fit the available box.
         """
         view_choice = self.holo_view_var.get()
 
         if view_choice == "Hologram":
             disp_arr = self.arr_c_view
             title    = "Hologram"
-
-        else:  # ---------- Fourier Transform ------------------------
-            # fall back to local FFT only if the worker has not yet
-            # delivered anything (rare, first few frames)
+        else:
             if self.ft_arrays:
                 disp_arr = self.ft_arrays[self.current_ft_index]
             else:
-                # one-off emergency local FFT (small & fast, 8-bit)
-                disp_arr = self._generate_ft_display(self.arr_c_view,
-                                                     log_scale=True)
+                disp_arr = self._generate_ft_display(self.arr_c_view, log_scale=True)
             title = "Fourier Transform"
-            # remember for zoom helpers etc.
             self._last_ft_display = disp_arr.copy()
 
-        pil  = Image.fromarray(disp_arr)
-        self.img_c = self._preserve_aspect_ratio_right(pil)
+        pil = Image.fromarray(disp_arr)
+        self.img_c = self._fit_left_image(pil)
         self.captured_label.configure(image=self.img_c)
-        self.captured_title_label.configure(text=title)
-
-        
+        self.captured_label.image = self.img_c
+        self.captured_title_label.configure(text=title)    
 
     def _get_current_array(self, what: str) -> np.ndarray | None:
         """
@@ -507,8 +823,6 @@ class App(ctk.CTk):
                 return self.amplitude_arrays[self.current_amp_index]
         return None 
     
-
-    # ------ wrappers de zoom ---------------------
     def zoom_holo_view(self, *args, **kwargs):
         tGUI.zoom_holo_view(self, *args, **kwargs)
 
@@ -532,34 +846,34 @@ class App(ctk.CTk):
             )
         menu.tk_popup(self.ft_mode_button.winfo_rootx(),
                       self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
-        
+
     def update_right_view(self):
+        """Safely refresh the right-hand viewer (Amplitude / Phase) with fit-to-box scaling."""
+        if not self.amplitude_arrays or not self.phase_arrays:
+            return
+
         view_name = self.recon_view_var.get().strip()
-        amp_mode  = getattr(self, "amp_mode_var",
-                            tk.StringVar(value="Amplitude")).get()
+        amp_mode  = getattr(self, "amp_mode_var", tk.StringVar(value="Amplitude")).get()
 
         if view_name.startswith("Phase"):
             src = self.phase_arrays[self.current_phase_index]
-
-        else:                                # “Amplitude Reconstruction”
-            if amp_mode == "Amplitude":
-                src = self.amplitude_arrays[self.current_amp_index]
-            else:                            # “Intensities”
-                src = self.intensity_arrays[self.current_int_index]
+        else:
+            src = self.amplitude_arrays[self.current_amp_index] if amp_mode == "Amplitude" \
+                  else self.intensity_arrays[self.current_int_index]
 
         disp = self._run_filters_pipeline(src, use_left_side=False)
-
         self.arr_r_view = self.arr_r = disp
+
         pil = Image.fromarray(disp)
-        self.img_r = self._preserve_aspect_ratio_right(pil)
+        self.img_r = self._fit_right_image(pil)
         self.processed_label.configure(image=self.img_r)
+        self.processed_label.image = self.img_r
         self.processed_title_label.configure(text=view_name)
 
     def _on_ft_mode_changed(self):
      self._refresh_all_ft_views()
 
     def _show_amp_mode_menu(self):
-     """Menú ‘Amplitude / Intensities’ para la reconstrucción."""
      menu = tk.Menu(self, tearoff=0)
      for opt in ("Amplitude", "Intensities"):
          menu.add_radiobutton(
@@ -573,10 +887,8 @@ class App(ctk.CTk):
     def _on_amp_mode_changed(self, *_):
         if self.recon_view_var.get().startswith("Amplitude"):
             self.update_right_view()
-
-    # ---------- utilidades de imagen ----------
+ 
     def _generate_ft_display(self, holo_array: np.ndarray, log_scale: bool = True) -> np.ndarray:
-     """Devuelve la magnitud (uint8) de la FT centrada; opcionalmente en escala log."""
      ft_cplx = np.fft.fftshift(np.fft.fft2(holo_array.astype(np.float32)))
      mag = np.abs(ft_cplx)
      if log_scale:
@@ -585,13 +897,11 @@ class App(ctk.CTk):
      return mag.astype(np.uint8)
 
     def _generate_intensity_display(self, amp_array_8bit: np.ndarray) -> np.ndarray:
-     """Convierte amplitud 8-bit en intensidades (|A|²) también en 8-bit."""
      amp_f = amp_array_8bit.astype(np.float32) / 255.0
      intens = amp_f ** 2
      intens = intens / (intens.max() + 1e-9) * 255.0
      return intens.astype(np.uint8)
-
-    # ---------- navegación entre hologramas ----------
+ 
     def previous_hologram_view(self):
         """Show the previous hologram and restore its filter UI state."""
         if not getattr(self, "multi_holo_arrays", []):
@@ -604,7 +914,6 @@ class App(ctk.CTk):
         # restore sliders / check-boxes for *this* hologram
         self.load_ui_from_filter_state(0, self.current_left_index)
         self.update_image_filters()
-
 
     def next_hologram_view(self):
         """Show the next hologram and restore its filter UI state."""
@@ -635,7 +944,6 @@ class App(ctk.CTk):
         self.left_arrow_holo.grid_remove()
         self.right_arrow_holo.grid_remove()
 
-    # functions for ft coordinates
     def _activate_ft_coordinate_display(self) -> None:
         """Bind mouse-motion to the FT image and show the label."""
         self.captured_label.bind("<Motion>", self._on_ft_mouse_move)
@@ -662,7 +970,6 @@ class App(ctk.CTk):
         # make “Parameters” the default view on the left‑hand column
         self.change_menu_to("parameters")
 
-
     def _make_unit_button(self,
                           parent      : ctk.CTkFrame,
                           row         : int,
@@ -675,7 +982,7 @@ class App(ctk.CTk):
 
         def _on_click(event=None):
             m = tk.Menu(self, tearoff=0, font=("Helvetica", 14))
-            for u in ("µm", "nm", "mm", "cm", "m", "in"):
+            for u in ( "nm", "µm", "mm", "cm"):
                 m.add_command(
                     label=u,
                     command=lambda unit=u: (
@@ -687,7 +994,6 @@ class App(ctk.CTk):
                    btn.winfo_rooty() + btn.winfo_height())
 
         btn.bind("<Button-1>", _on_click)
-
 
     def _set_unit_in_label(self, lbl: ctk.CTkLabel, unit: str) -> None:
 
@@ -720,10 +1026,8 @@ class App(ctk.CTk):
         except ValueError:
             raise ValueError(f"Cannot convert “{value}” into float.")
         return val_f * conversion.get(unit, 1.0)
-
-
+    
     def _setup_unit_buttons(self) -> None:
-
         # 1) first‑time initialisation of unit attributes
         if not hasattr(self, "wavelength_unit"):
             self.wavelength_unit = "µm"
@@ -749,16 +1053,6 @@ class App(ctk.CTk):
                                unit_var=self._dist_unit_var,
                                label_target=self.L_slider_title)
 
-
-    def choose_load_option(self, selected_option):
-        """Callback for the Load OptionMenu."""
-        if selected_option == "Load image":
-            self.selectfile()
-        elif selected_option == "Select reference":
-            self.selectref()
-        elif selected_option == "Reset reference":
-            self.resetref()
-
     def show_save_options(self):
         """Creates an OptionMenu with two choices: save capture or save reconstruction."""
         if hasattr(self, 'save_options_menu') and self.save_options_menu.winfo_ismapped():
@@ -778,8 +1072,6 @@ class App(ctk.CTk):
             self.save_capture()
         elif selected_option == "Save reconstruction":
             self.save_processed()
-
-
    
     def _sync_canvas_bg(self):
      col = self.Tools_frame.cget("fg_color")
@@ -830,10 +1122,7 @@ class App(ctk.CTk):
             text="Parameters",
             font=ctk.CTkFont(weight="bold"))
         title_lbl.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
-
-        # ============================================================
-        #  A) THREE-PARAMETER HEADER  (row-1)
-        # ============================================================
+ 
         self.variables_frame = ctk.CTkFrame(
             self.parameters_inner_frame,
             width=PARAMETER_FRAME_WIDTH,
@@ -846,7 +1135,7 @@ class App(ctk.CTk):
         for c in range(3):
             self.variables_frame.columnconfigure(c, weight=1)
 
-        units = ["µm", "nm", "mm", "cm", "m", "in"]
+        units = ["nm", "µm", "mm", "cm"]
 
         # -- wavelength, pitch-X, pitch-Y ----------------------------
         fGUI.create_param_with_arrow(
@@ -881,9 +1170,7 @@ class App(ctk.CTk):
         self.pitchx_entry = self.param_entries["pitch_x"]
         self.pitchy_entry = self.param_entries["pitch_y"]
 
-        # ============================================================
         #  B) L-FRAME  (row-2)  – incluye Magnification & unit ▼
-        # ============================================================
         self.L_frame = ctk.CTkFrame(
             self.parameters_inner_frame,
             width=PARAMETER_FRAME_WIDTH,
@@ -929,18 +1216,15 @@ class App(ctk.CTk):
         #    Z-frame  → row 3
         #    r-frame  → row 4
         #    (todo lo de abajo es IGUAL, así que mantenlo igual)
-        # ============================================================
-
-        # *** IMPORTANTE ***
-        # actualiza el número de fila (+1 offset) para Z-frame, r-frame, etc.
-        start_row = 3  # primera fila después del nuevo L-frame
+        # ===========================================================
+        start_row = 3  
         self._build_Z_r_and_remaining_frames(start_row)
 
         # Final scroll-region update
         self.parameters_inner_frame.update_idletasks()
         self.param_canvas.config(scrollregion=self.param_canvas.bbox("all"))
 
-        # RIGHT column – vacío por ahora: los helpers lo rellenan.
+        # RIGHT column
         self.viewing_frame = ctk.CTkFrame(self, corner_radius=8)
         self.viewing_frame.grid(row=0, column=1, sticky="nsew")
         self.viewing_frame.grid_rowconfigure(0, weight=0)   # toolbar
@@ -1115,7 +1399,6 @@ class App(ctk.CTk):
         self.dl_algorithm_radio.grid(row=1, column=2, sticky="w",
                                      padx=5, pady=5)       
 
-
         # limits_frame
         self.limits_frame = ctk.CTkFrame(self.parameters_inner_frame,
                                          width=PARAMETER_FRAME_WIDTH,
@@ -1184,52 +1467,123 @@ class App(ctk.CTk):
                                                    command=self.restore_limits)
         self.restore_limits_button.grid(row=2, column=4, sticky="ew", padx=10)
 
-        # ====================================================================
-        #   RECORD SECTION  (replaces the old “Theme” OptionMenu)
-        # ====================================================================
-
-        self.record_frame = ctk.CTkFrame(
-            self.parameters_inner_frame,
-            width=PARAMETER_FRAME_WIDTH,
-            height=PARAMETER_FRAME_HEIGHT
-        )
-        self.record_frame.grid(row=first_row + 5, column=0,
-                               sticky="ew", pady=2)
+ 
+        # ============ Compensation Controls (INLINE) ============
+        self.compensate_frame = ctk.CTkFrame(self.parameters_inner_frame,
+                                          width=PARAMETER_FRAME_WIDTH, height=80)
+        self.compensate_frame.grid(row=first_row+5, column=0, sticky="ew", pady=(6, 8))
+        self.compensate_frame.grid_propagate(False)
+        for c in (0, 1):
+         self.compensate_frame.columnconfigure(c, weight=1)
+ 
+        ctk.CTkLabel(self.compensate_frame, text="Compensation Controls",
+                  font=ctk.CTkFont(weight="bold")).grid(
+         row=0, column=0, columnspan=2, padx=10, pady=(5), sticky="w")
+ 
+        self.compensate_button = ctk.CTkButton(
+         self.compensate_frame, text="⚙ Compensate", width=120,
+         command=self.start_compensation)
+        self.compensate_button.grid(row=1, column=0, sticky="w",
+                                 padx=10, pady=(5))
+ 
+        self.playstop_frame = ctk.CTkFrame(self.compensate_frame, fg_color="transparent")
+        self.playstop_frame.grid(row=1, column=1, sticky="e", padx=10, pady=(5))
+ 
+        self.play_button = ctk.CTkButton(self.playstop_frame, text="▶ Play",
+                                      width=80, command=self._on_play)
+        self.play_button.pack(side="left", padx=10)
+        self.stop_button = ctk.CTkButton(self.playstop_frame, text="⏹ Stop",
+                                      width=80, command=self._on_stop)
+        self.stop_button.pack(side="left")
+ 
+        # ============ Record frame ============
+        self.record_frame = ctk.CTkFrame(self.parameters_inner_frame,
+                                      width=PARAMETER_FRAME_WIDTH,
+                                      height=PARAMETER_FRAME_HEIGHT*1.5)
+        self.record_frame.grid(row=first_row+6, column=0, sticky="ew", pady=2)
         self.record_frame.grid_propagate(False)
-
         for col in (0, 1, 2, 3):
-            self.record_frame.columnconfigure(col, weight=1)
+         self.record_frame.columnconfigure(col, weight=1)
+ 
 
-        ctk.CTkLabel(self.record_frame, text="Record").grid(
-            row=0, column=0, padx=10, pady=10, sticky="w"
+        ctk.CTkLabel(self.record_frame,
+                     text="Record Options",
+                     font=ctk.CTkFont(weight="bold")).grid(
+            row=0, column=0, columnspan=5, padx=10, pady=(5, 5), sticky="w"
         )
 
+        ctk.CTkLabel(self.record_frame, text="Record").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+ 
         self.record_var = ctk.StringVar(value="Phase")
-        ctk.CTkOptionMenu(
-            self.record_frame,
-            values=["Phase", "Amplitude", "Hologram"],
-            variable=self.record_var,
-            width=120
-        ).grid(row=0, column=1, padx=(0, 5), pady=10, sticky="w")
+        ctk.CTkOptionMenu(self.record_frame, values=["Phase", "Amplitude", "Hologram"],
+                       variable=self.record_var, width=120)\
+         .grid(row=1, column=1, padx=(0, 5), pady=5, sticky="w")
+ 
+        ctk.CTkButton(self.record_frame, text="Start", width=70, command=self.start_record)\
+         .grid(row=1, column=2, padx=(0, 5), pady=5, sticky="ew")
+        ctk.CTkButton(self.record_frame, text="Stop", width=70, command=self.stop_recording)\
+         .grid(row=1, column=3, padx=(0, 10), pady=5, sticky="ew")
+ 
+        self.record_indicator = ctk.CTkLabel(self.record_frame, text="●  REC",
+                                          text_color="red", font=ctk.CTkFont(weight="bold"))
+        self.record_indicator.grid(row=2, column=0, columnspan=4, pady=(0, 6))
+        self.record_indicator.grid_remove()
 
-        ctk.CTkButton(
-            self.record_frame, text="Start", width=70,
-            command=self.start_record
-        ).grid(row=0, column=2, padx=(0, 5), pady=10, sticky="ew")
+    def _ensure_reconstruction_alive(self) -> None:
+        """
+        (Re)spawn the ``reconstruct`` worker if it died because of a
+        previous ZeroDivisionError, or if it was never started.
+        """
+        if getattr(self, "reconstruction", None) and self.reconstruction.is_alive():
+            return                                          # already running
 
-        ctk.CTkButton(
-            self.record_frame, text="Stop", width=70,
-            command=self.stop_recording
-        ).grid(row=0, column=3, padx=(0, 10), pady=10, sticky="ew")
+        try:                                               # terminate zombie
+            if self.reconstruction:
+                self.reconstruction.terminate()
+                self.reconstruction.join(timeout=0.3)
+        except Exception:
+            pass                                           # ignore any failure
 
-        # red “● REC” sign (hidden until recording starts)
-        self.record_indicator = ctk.CTkLabel(
-            self.record_frame, text="●  REC", text_color="red",
-            font=ctk.CTkFont(weight="bold")
+        # spawn a fresh worker that uses the *same* queues
+        self.reconstruction = Process(
+            target=reconstruct, args=(self.queue_manager,)
         )
-        self.record_indicator.grid(row=1, column=0, columnspan=4,
-                                   pady=(0, 6))
-        self.record_indicator.grid_remove()   
+        self.reconstruction.daemon = True
+        self.reconstruction.start()
+        print("[COMP] Reconstruction worker (re)started.")
+
+    def start_compensation(self):
+        """
+        Trigger (or re-trigger) real-time reconstruction.
+        Now checks that both *wavelength* and *pixel pitch* are valid
+        before enabling compensation, and self-heals if the worker
+        crashed earlier because of invalid parameters.
+        """
+        self.set_variables()          # read λ & pixel pitch from the UI
+
+        # ----------- 1) sanity-check the two core parameters ----------
+        if self.wavelength <= 0 or self.dxy <= 0:
+            tk.messagebox.showwarning(
+                "Missing parameters",
+                "Please enter a positive Wavelength and Pixel Pitch "
+                "before starting compensation."
+            )
+            return                                  # abort cleanly
+
+        # ----------- 2) make sure the worker is alive -----------------
+        self._ensure_reconstruction_alive()
+
+        # ----------- 3) push the latest parameters & start ------------
+        self.update_parameters()                    # refresh sliders/labels
+        self.acquisition_active       = True
+        self.compensating             = True
+        self.was_compensating_on_stop = True        # for Play → resume
+
+        # auto-start the preview loop if it was not running
+        if not getattr(self, "preview_active", False):
+            self._on_play()
+
+        print("[COMP] Real-time compensation started.")
 
     def start_record(self):
         """Begin capturing frames from the chosen source."""
@@ -1310,7 +1664,6 @@ class App(ctk.CTk):
         # update every caption / placeholder in the UI
         self._on_distance_unit_change(unit)
 
-
     def _reset_all_images(self) -> None:
         """Forget every capture/reconstruction currently stored."""
         # left-hand
@@ -1334,7 +1687,6 @@ class App(ctk.CTk):
         self.arr_r_orig = np.zeros((1, 1), dtype=np.uint8)
         # UI niceties
         self.hide_holo_arrows()
-
 
     def _sync_filter_state_from_ui(self) -> None:
         """
@@ -1390,69 +1742,58 @@ class App(ctk.CTk):
         """
         Refresh internal buffers for Amplitude, Phase, Intensity **and**
         the live Fourier Transform coming from the worker process.
+        Also measures Reconstruction FPS (how many outputs per second
+        we are actually consuming in the GUI thread).
         """
 
-        # -------------------------------------------------- fetch fresh data
         out = self.recon_output
         if amp_arr   is None: amp_arr   = out.get("amp")
         if phase_arr is None: phase_arr = out.get("phase")
         if int_arr   is None: int_arr   = out.get("int")
         if ft_arr    is None: ft_arr    = out.get("ft")
 
-        if amp_arr is None or phase_arr is None:          # nothing usable
+        if amp_arr is None or phase_arr is None:
             return
 
-        # -------------------------------------------------- keep originals
+        # --- Recon FPS measurement (EMA-smoothed) ----------------------
+        now = time.time()
+        last = getattr(self, "_last_r_time", None)
+        if last is not None:
+            inst = 1.0 / max(now - last, 1e-6)
+            ema  = 0.85 * getattr(self, "_r_fps_ema", 0.0) + 0.15 * inst
+            self._r_fps_ema = ema
+            self.r_fps = round(ema, 1)
+        self._last_r_time = now
+        # ----------------------------------------------------------------
+
+        # originals
         self.original_amplitude_arrays = [amp_arr.copy()]
         self.original_phase_arrays     = [phase_arr.copy()]
 
-        # intensity fallback (worker may omit it)
         if int_arr is None:
             tmp = (amp_arr.astype(np.float32) / 255.0) ** 2
             int_arr = (tmp / (tmp.max() + 1e-9) * 255).astype(np.uint8)
-
         self.original_intensity_arrays = [int_arr.copy()]
 
-        # -------------------------------------------------- working copies
+        # working copies
         self.amplitude_arrays = [amp_arr.copy()]
         self.phase_arrays     = [phase_arr.copy()]
         self.intensity_arrays = [int_arr.copy()]
 
-        # -------------------------------------------------- filter recall
-        self._ensure_filter_state_lists_length()
-        st_amp   = self.filter_states_dim1[0]
-        st_phase = self.filter_states_dim2[0]
-        """ 
-        if self._filters_enabled(st_amp):
-            self.amplitude_arrays[0] = self._apply_filters_from_state(
-                self.amplitude_arrays[0], st_amp)
-
-        if self._filters_enabled(st_phase):
-            self.phase_arrays[0] = self._apply_filters_from_state(
-                self.phase_arrays[0], st_phase)
-
-        # -------------------------------------------------- colour-maps
-        self.amplitude_arrays[0] = self._apply_ui_colormap(
-            self.amplitude_arrays[0], self._active_cmap_amp)
-        self.phase_arrays[0] = self._apply_ui_colormap(
-            self.phase_arrays[0], self._active_cmap_phase)
-
-        # -------------------------------------------------- live speckle
-        if self._current_speckle_method() is not None:
-            self._apply_live_speckle_if_active()
-        """
-        # -------------------------------------------------- live Fourier T
+        # Live FT → keep only the array; render via _fit_left_image if visible
         if ft_arr is not None:
-            self.ft_arrays   = [ft_arr.copy()]
-            pil_ft           = Image.fromarray(ft_arr)
-            self.ft_frames   = [self._preserve_aspect_ratio_right(pil_ft)]
-            self.current_ft_index = 0
+            self.ft_arrays          = [ft_arr.copy()]
+            self.current_ft_index   = 0
+            self._last_ft_display   = ft_arr.copy()
 
-            # refresh left viewer if FT is currently displayed
-            if self.holo_view_var.get() == "Fourier Transform":
-                self.img_c = self.ft_frames[0]
-                self.captured_label.configure(image=self.img_c)
-                self.captured_label.configure(image=self.img_c)
+            # If FT is being shown on the left, redraw using the STABLE fit
+            if hasattr(self, "holo_view_var") and self.holo_view_var.get() == "Fourier Transform":
+                pil = Image.fromarray(self._last_ft_display)
+                self.img_c = self._fit_left_image(pil)
+                if hasattr(self, "captured_label"):
+                    self.captured_label.configure(image=self.img_c)
+                    self.captured_label.image = self.img_c
+
         
     def _remove_legacy_show_checkboxes(self):
         """Hide the old ‘Show Intensity’ and ‘Show Phase’ tick-boxes."""
@@ -1483,7 +1824,7 @@ class App(ctk.CTk):
 
         self._distance_unit_menu = ctk.CTkOptionMenu(
             container,
-            values=["µm", "nm", "mm", "cm", "m", "in"],
+            values=["nm", "µm", "mm", "cm"],
             variable=self._dist_unit_var,
             command=self._on_distance_unit_change,
             width=90
@@ -1491,51 +1832,54 @@ class App(ctk.CTk):
         self._distance_unit_menu.grid(row=0, column=0, sticky="ew")
 
     def _on_distance_unit_change(self, new_unit: str) -> None:
-        """Triggered by the ▼ in ‘Distances’. Refresh everything."""
-        self.distance_unit = new_unit
-        self._dist_unit_var.set(new_unit)      # keep StringVar in-sync
-        self._refresh_distance_unit_labels()   # redraw captions
+      self.distance_unit = new_unit
+      self._dist_unit_var.set(new_unit)
+
+      # Match requested behavior: 0..20000 of the CHOSEN unit
+      # INIT_MIN_L / INIT_MAX_L are numeric "0..20000" defaults
+      factor = self._unit_factor(new_unit)  # µm per new unit
+
+      self.MIN_L = INIT_MIN_L * factor
+      self.MAX_L = INIT_MAX_L * factor
+      self.MIN_Z = INIT_MIN_L * factor
+      self.MAX_Z = INIT_MAX_L * factor
+      self.MIN_R = INIT_MIN_L * factor
+      self.MAX_R = INIT_MAX_L * factor
+
+      # Reconfigure sliders (internal µm bounds)
+      self.L_slider.configure(from_=self.MIN_L, to=self.MAX_L)
+      self.Z_slider.configure(from_=self.MIN_Z, to=self.MAX_Z)
+      self.r_slider.configure(from_=self.MIN_R, to=self.MAX_R)
+
+      # Clamp current values to the new limits (still in µm)
+      self.L = max(self.MIN_L, min(self.L, self.MAX_L))
+      self.Z = max(self.MIN_Z, min(self.Z, self.MAX_Z))
+      self.r = max(self.MIN_R, min(self.r, self.MAX_R))
+
+      # Update limit table labels/placeholders and the main slider titles
+      self._refresh_distance_unit_labels()
+      self.update_parameters()
 
 
     def _refresh_distance_unit_labels(self) -> None:
-        u      = self.distance_unit
-        factor = self._unit_factor(u)
+      u      = self.distance_unit
+      factor = self._unit_factor(u)
 
-        # Distances header
-        self.dist_label.configure(text=f"Distances ({u})")
+      # Distances header
+      self.dist_label.configure(text=f"Distances ({u})")
 
-        # Slider captions
-        self.L_slider_title.configure(
-            text=f"Distance between camera and source L ({u}): "
-                 f"{round(self.L / factor, 4)}")
-        self.Z_slider_title.configure(
-            text=f"Distance between sample and source Z ({u}): "
-                 f"{round(self.Z / factor, 4)}")
-        self.r_slider_title.configure(
-            text=f"Reconstruction distance r ({u}): "
-                 f"{round(self.r / factor, 4)}")
+      # Limits-frame headings
+      self.limit_L_label.configure(text=f"L ({u})")
+      self.limit_Z_label.configure(text=f"Z ({u})")
+      self.limit_R_label.configure(text=f"r ({u})")
 
-        # Limits-frame headings
-        self.limit_L_label.configure(text=f"L ({u})")
-        self.limit_Z_label.configure(text=f"Z ({u})")
-        self.limit_R_label.configure(text=f"r ({u})")
-
-        # Limits-frame placeholders
-        self.limit_min_L_entry.configure(
-            placeholder_text=f"{round(self.MIN_L / factor, 4)}")
-        self.limit_max_L_entry.configure(
-            placeholder_text=f"{round(self.MAX_L / factor, 4)}")
-        self.limit_min_Z_entry.configure(
-            placeholder_text=f"{round(self.MIN_Z / factor, 4)}")
-        self.limit_max_Z_entry.configure(
-            placeholder_text=f"{round(self.MAX_Z / factor, 4)}")
-        self.limit_min_R_entry.configure(
-            placeholder_text=f"{round(self.MIN_R / factor, 4)}")
-        self.limit_max_R_entry.configure(
-            placeholder_text=f"{round(self.MAX_R / factor, 4)}")
-
-        # Force the per-slider numeric update as well
-        self.update_parameters()
+      # Limits placeholders shown in the chosen unit
+      self.limit_min_L_entry.configure(placeholder_text=f"{round(self.MIN_L / factor, 4)}")
+      self.limit_max_L_entry.configure(placeholder_text=f"{round(self.MAX_L / factor, 4)}")
+      self.limit_min_Z_entry.configure(placeholder_text=f"{round(self.MIN_Z / factor, 4)}")
+      self.limit_max_Z_entry.configure(placeholder_text=f"{round(self.MAX_Z / factor, 4)}")
+      self.limit_min_R_entry.configure(placeholder_text=f"{round(self.MIN_R / factor, 4)}")
+      self.limit_max_R_entry.configure(placeholder_text=f"{round(self.MAX_R / factor, 4)}")
 
     def _run_filters_pipeline(self, img: np.ndarray,
                               use_left_side: bool) -> np.ndarray:
@@ -1599,22 +1943,22 @@ class App(ctk.CTk):
 
 
     def _recompute_and_show(self, left: bool = False, right: bool = False):
-        """Build *display* images from pristine copies + checked filters."""
+        """Build display images from pristine copies + filters with fit-to-box scaling."""
         if left:
-            self.arr_c_view = self._run_filters_pipeline(self.arr_c_orig,
-                                                         use_left_side=True)
-            self.arr_c = self.arr_c_view            # keep public reference
-            im = Image.fromarray(self.arr_c_view)
-            self.img_c = self._preserve_aspect_ratio_right(im)
+            self.arr_c_view = self._run_filters_pipeline(self.arr_c_orig, use_left_side=True)
+            self.arr_c = self.arr_c_view
+            pil = Image.fromarray(self.arr_c_view)
+            self.img_c = self._fit_left_image(pil)
             self.captured_label.configure(image=self.img_c)
+            self.captured_label.image = self.img_c
 
         if right:
-            self.arr_r_view = self._run_filters_pipeline(self.arr_r_orig,
-                                                         use_left_side=False)
+            self.arr_r_view = self._run_filters_pipeline(self.arr_r_orig, use_left_side=False)
             self.arr_r = self.arr_r_view
-            im = Image.fromarray(self.arr_r_view)
-            self.img_r = self._preserve_aspect_ratio_right(im)
+            pil = Image.fromarray(self.arr_r_view)
+            self.img_r = self._fit_right_image(pil)
             self.processed_label.configure(image=self.img_r)
+            self.processed_label.image = self.img_r
 
     # ------------------------------------------------------------------
     # apply_filters – now performs the work immediately on screen
@@ -1804,35 +2148,48 @@ class App(ctk.CTk):
             self.store_filter_state(2, self.current_phase_index)
         else:                                                       # amplitude/intensity
             self.store_filter_state(1, self.current_amp_index)
-    '''
-    def update_parameters(self):
-         
-        self.Z_slider_title.configure(text=f'Distance between the sample and the source (Z): {round(self.Z, 4)}')
-        self.Z_slider.set(round(self.Z, 4))
-        self.Z_slider_entry.configure(placeholder_text=f'{round(self.Z, 4)}')
-        self.L_slider_title.configure(text=f'Distance between the camera and the source (L):{round(self.L, 4)}')
-        self.L_slider.set(round(self.L, 4))
-        self.L_slider_entry.configure(placeholder_text=f'{round(self.L, 4)}')
-        self.r_slider_title.configure(text=f'Reconstruction distance r ({self.wavelength_unit}): {round(self.r, 4)}')
-        self.r_slider.set(round(self.r, 4))
-        self.r_slider_entry.configure(placeholder_text=f'{round(self.r, 4)}')
-        self.magnification_label.configure(text=f'Magnification:{round(self.scale_factor, 4)}')
-        self.scale_factor = self.L/self.Z if self.Z!=0 else self.L/MIN_DISTANCE
-    '''
-    def update_parameters(self):
-        u = self.distance_unit                                  
-        self.Z_slider_title.configure(text=f"Distance between sample and source Z ({u}): {round(self.Z,4)}")
-        self.Z_slider.set(round(self.Z, 4))
-        self.Z_slider_entry.configure(placeholder_text=f"{round(self.Z,4)}")
-        self.L_slider_title.configure(text=f"Distance between camera and source L ({u}): {round(self.L,4)}")
-        self.L_slider.set(round(self.L, 4))
-        self.L_slider_entry.configure(placeholder_text=f"{round(self.L,4)}")
-        self.r_slider_title.configure(text=f"Reconstruction distance r ({u}): {round(self.r,4)}")
-        self.r_slider.set(round(self.r, 4))
-        self.r_slider_entry.configure(placeholder_text=f"{round(self.r,4)}")
-        self.scale_factor = self.L / self.Z if self.Z != 0 else self.L / MIN_DISTANCE
-        self.magnification_label.configure(text=f"Magnification: {round(self.scale_factor, 4)}")
 
+
+    def update_parameters(self):
+      """
+      Refresh slider titles, entries and magnification.
+      Always DISPLAY values in the currently selected distance unit,
+      while keeping internal storage in micrometers (µm).
+      """
+      u = self.distance_unit
+      factor = self._unit_factor(u)  # µm per 1 <u>
+
+      # Display values in the chosen unit
+      L_disp = round(self.L / factor, 4)
+      Z_disp = round(self.Z / factor, 4)
+      r_disp = round(self.r / factor, 4)
+
+      # Titles
+      self.Z_slider_title.configure(
+          text=f"Distance between sample and source Z ({u}): {Z_disp}"
+      )
+      self.L_slider_title.configure(
+          text=f"Distance between camera and source L ({u}): {L_disp}"
+      )
+      self.r_slider_title.configure(
+          text=f"Reconstruction distance r ({u}): {r_disp}"
+      )
+
+      # Sliders operate in internal µm (do not convert here)
+      self.Z_slider.set(self.Z)
+      self.L_slider.set(self.L)
+      self.r_slider.set(self.r)
+
+      # Entry placeholders shown in the chosen unit
+      self.Z_slider_entry.configure(placeholder_text=f"{Z_disp}")
+      self.L_slider_entry.configure(placeholder_text=f"{L_disp}")
+      self.r_slider_entry.configure(placeholder_text=f"{r_disp}")
+
+      # Magnification is unitless
+      self.scale_factor = self.L / self.Z if self.Z != 0 else self.L / MIN_DISTANCE
+      self.magnification_label.configure(
+          text=f"Magnification: {round(self.scale_factor, 4)}"
+      )
 
     def update_L(self, val):
         '''Updates the value of L based on the slider'''
@@ -1883,7 +2240,6 @@ class App(ctk.CTk):
 
         self.update_parameters()
 
-
     def set_value_L(self):
         try:
             user_val = self.get_value_in_micrometers(
@@ -1918,24 +2274,41 @@ class App(ctk.CTk):
         self.update_r(user_val)
 
     def set_limits(self):
-     """Lee los límites introducidos y actualiza los sliders."""
-     try: self.MIN_L = float(self.limit_min_L_entry.get())
-     except ValueError: print("self.MIN_L received invalid value.")
-     try: self.MAX_L = float(self.limit_max_L_entry.get())
-     except ValueError: print("self.MAX_L received invalid value.")
-     try: self.MIN_Z = float(self.limit_min_Z_entry.get())
-     except ValueError: print("self.MIN_Z received invalid value.")
-     try: self.MAX_Z = float(self.limit_max_Z_entry.get())
-     except ValueError: print("self.MAX_Z received invalid value.")
-     try: self.MIN_R = float(self.limit_min_R_entry.get())     # ← R mayúscula
-     except ValueError: print("self.MIN_R received invalid value.")
-     try: self.MAX_R = float(self.limit_max_R_entry.get())
-     except ValueError: print("self.MAX_R received invalid value.")
- 
-     self.L_slider.configure(from_=self.MIN_L, to=self.MAX_L)
-     self.Z_slider.configure(from_=self.MIN_Z, to=self.MAX_Z)
-     self.r_slider.configure(from_=self.MIN_R, to=self.MAX_R)
+      factor = self._unit_factor(self.distance_unit)  # µm per 1 <u>
 
+      def _read(entry, fallback):
+          try:
+              txt = entry.get().strip().replace(",", ".")
+              if txt == "":
+                  return fallback
+              return float(txt) * factor  # convert to µm
+          except Exception:
+              return fallback
+
+      self.MIN_L = _read(self.limit_min_L_entry, self.MIN_L)
+      self.MAX_L = _read(self.limit_max_L_entry, self.MAX_L)
+      self.MIN_Z = _read(self.limit_min_Z_entry, self.MIN_Z)
+      self.MAX_Z = _read(self.limit_max_Z_entry, self.MAX_Z)
+      self.MIN_R = _read(self.limit_min_R_entry, self.MIN_R)
+      self.MAX_R = _read(self.limit_max_R_entry, self.MAX_R)
+
+      # Ensure proper ordering (avoid inverted ranges)
+      if self.MIN_L > self.MAX_L: self.MIN_L, self.MAX_L = self.MAX_L, self.MIN_L
+      if self.MIN_Z > self.MAX_Z: self.MIN_Z, self.MAX_Z = self.MAX_Z, self.MIN_Z
+      if self.MIN_R > self.MAX_R: self.MIN_R, self.MAX_R = self.MAX_R, self.MIN_R
+
+      # Apply to sliders (still in µm)
+      self.L_slider.configure(from_=self.MIN_L, to=self.MAX_L)
+      self.Z_slider.configure(from_=self.MIN_Z, to=self.MAX_Z)
+      self.r_slider.configure(from_=self.MIN_R, to=self.MAX_R)
+
+      # Clamp current values to new limits
+      self.L = max(self.MIN_L, min(self.L, self.MAX_L))
+      self.Z = max(self.MIN_Z, min(self.Z, self.MAX_Z))
+      self.r = max(self.MIN_R, min(self.r, self.MAX_R))
+
+      # Refresh UI (labels in selected unit)
+      self.update_parameters()
 
     def _ensure_filter_state_lists_length(self) -> None:
         """Rellena las tablas de estado de filtros con diccionarios vacíos."""
@@ -1962,16 +2335,113 @@ class App(ctk.CTk):
         self.Z_slider.configure(from_=self.MIN_Z, to=self.MAX_Z)
         self.r_slider.configure(from_=self.MIN_R, to=self.MAX_R)
 
-    
-    def change_menu_to(self, name: str):
-     """Shows one left-column pane and hides the rest."""
-     if name == "home":
-         name = "parameters"
+    def disable_camera_capture(self) -> None:
+        """
+        Stop/disable the continuous camera acquisition cleanly.
+        This terminates the background capture process and clears
+        pending capture queues so the GUI loop won't block.
+        """
+        # Nothing to do if we already disabled it
+        if getattr(self, "capture_disabled", False):
+            return
 
-     # Parameters
-     self.navigation_frame.grid(row=0, column=0, sticky="nsew", padx=5) \
-         if name == "parameters" else self.navigation_frame.grid_forget()
-     
+        # Try to terminate the capture process if it's alive
+        try:
+            if hasattr(self, "capture") and self.capture is not None:
+                if self.capture.is_alive():
+                    self.capture.terminate()
+                    self.capture.join(timeout=0.8)
+        except Exception as e:
+            print(f"[disable_camera_capture] warning: {e}")
+
+        # Best-effort: drain capture queues so future puts/gets don't hang
+        try:
+            cap_in  = self.queue_manager["capture"]["input"]
+            cap_out = self.queue_manager["capture"]["output"]
+            while not cap_in.empty():
+                cap_in.get_nowait()
+            while not cap_out.empty():
+                cap_out.get_nowait()
+        except Exception:
+            pass
+
+        # Mark disabled and reset basic indicators
+        self.capture_disabled = True
+        self.c_fps = 0
+        # If you have an FPS label widget, update it defensively
+        if hasattr(self, "captured_title_label"):
+            try:
+                # Title stays, but you can also reflect 'stopped' state if you want
+                pass
+            except Exception:
+                pass
+
+    def disable_webcam_device(self) -> None:
+        """
+        Fully stop continuous acquisition and release the webcam so the
+        device LED turns off. Idempotent: safe to call multiple times.
+        """
+        # Stop UI loops / flags first
+        self.acquisition_active = False
+        self.preview_active = False
+        self.compensating = False
+        self.was_compensating_on_stop = False
+
+        # Cancel any scheduled preview tick
+        if hasattr(self, "_preview_after_id") and getattr(self, "_preview_after_id", None):
+            try:
+                self.after_cancel(self._preview_after_id)
+            except Exception:
+                pass
+            self._preview_after_id = None
+
+        # Release OpenCV handle (this actually turns the camera LED off)
+        try:
+            if hasattr(self, "cap") and self.cap is not None:
+                try:
+                    self.cap.release()
+                finally:
+                    self.cap = None
+        except Exception as e:
+            print(f"[disable_webcam_device] warning releasing camera: {e}")
+
+        # Clear last cached frames so nothing tries to reuse them
+        for attr in ("last_preview_gray", "last_preview_ft"):
+            if hasattr(self, attr):
+                setattr(self, attr, None)
+
+        # Reset capture-side FPS indicator
+        self.c_fps = 0.0
+        if hasattr(self, "c_fps_label"):
+            try:
+                self.c_fps_label.configure(text="FPS: 0.0")
+            except Exception:
+                pass
+ 
+    def change_menu_to(self, name: str):
+        """
+        Shows one left-column pane and hides the rest.
+        Additionally: if called with 'home', hard-disable the webcam
+        (stop preview loop + release device) BEFORE changing views.
+        """
+        if name == "home":
+            # Stop any legacy capture process queue flushing (if present)
+            try:
+                self.disable_camera_capture()
+            except Exception:
+                pass
+
+            # ensure the physical camera is released (LED off)
+            self.disable_webcam_device()
+
+            # Your existing behavior maps 'home' to 'parameters'
+            name = "parameters"
+
+        # Parameters
+        if name == "parameters":
+            self.navigation_frame.grid(row=0, column=0, sticky="nsew", padx=5)
+        else:
+            self.navigation_frame.grid_forget()
  
     def update_im_size(self, size):
         '''Updates scale from slider'''
@@ -1998,7 +2468,6 @@ class App(ctk.CTk):
         pil_img: Image.Image = self.img_c.cget("light_image")
         pil_img.save(target)
         print(f"[save_capture] Hologram saved →  {target}")
-
 
     def save_processed(self, ext: str = "bmp"):
         """Open a ‘Save as…’ dialog and store the *current* reconstruction."""
@@ -2052,7 +2521,30 @@ class App(ctk.CTk):
         self._convert_dist_selector()
         self._sync_canvas_and_frame_bg()
         self._remove_legacy_show_checkboxes()
-        self._customize_bio_analysis() 
+        self._customize_bio_analysis()
+        if not hasattr(self, "compensate_frame"):
+            self._build_compensation_controls()
+
+    def _preserve_aspect_ratio(self, pil_image: Image.Image, max_width: int, max_height: int) -> ImageTk.PhotoImage:
+        """
+        Scales 'pil_image' down (never up) to fit within (max_width x max_height),
+        preserving the original aspect ratio. Returns the resulting PhotoImage.
+        """
+        original_w, original_h = pil_image.size
+
+        # If smaller or equal, no upscaling (unless you want to allow it).
+        if original_w <= max_width and original_h <= max_height:
+            resized = pil_image
+        else:
+            # Shrink to keep the aspect ratio correct
+            ratio_w = max_width / float(original_w)
+            ratio_h = max_height / float(original_h)
+            scale_factor = min(ratio_w, ratio_h)
+            new_w = int(original_w * scale_factor)
+            new_h = int(original_h * scale_factor)
+            resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        return ImageTk.PhotoImage(resized)
 
     def _customize_bio_analysis(self) -> None:
         """
@@ -2106,7 +2598,7 @@ class App(ctk.CTk):
         # ---------- 3. refresh scroll region -------------------------
         if hasattr(self, "bio_inner_frame") and hasattr(self, "bio_canvas"):
             self.bio_inner_frame.update_idletasks()
-            self.bio_canvas.configure(
+            self.bio_canvas.configure( 
                 scrollregion=self.bio_canvas.bbox("all")
             )
 
@@ -2118,17 +2610,34 @@ class App(ctk.CTk):
          self._sync_canvas_and_frame_bg()
 
     def open_main_menu(self):
-     if hasattr(self, '_draw_after_id'):
-            self.after_cancel(self._draw_after_id)
-     self.destroy()
-     # replace 'main_menu' with the actual module name where MainMenu lives
-     main_mod = import_module("Main_")
-     reload(main_mod)
+        """
+        Invoked by the toolbar 'Home' button. First, hard-disable the
+        webcam (stop preview and release device/LED), then leave to the
+        external Main Menu.
+        """
+        # Stop any draw loop scheduled
+        if hasattr(self, "_draw_after_id") and getattr(self, "_draw_after_id", None):
+            try:
+                self.after_cancel(self._draw_after_id)
+            except Exception:
+                pass
+            self._draw_after_id = None
 
-     MainMenu = getattr(main_mod, "MainMenu")
-     MainMenu().mainloop()
+        # Legacy capture process (if used anywhere)
+        try:
+            self.disable_camera_capture()
+        except Exception:
+            pass
 
+        #actually release the webcam so the LED goes off
+        self.disable_webcam_device()
 
+        # Tear down this window and open the external Main Menu
+        self.destroy()
+        main_mod = import_module("Main_")
+        reload(main_mod)
+        MainMenu = getattr(main_mod, "MainMenu")
+        MainMenu().mainloop()
 
     def selectfile(self):
         """Load a hologram image from disk and trigger one reconstruction."""
@@ -2278,85 +2787,75 @@ class App(ctk.CTk):
     def return_to_stream(self):
         self.file_path = ''
 
-    
+
+
     def draw(self):
-        """Main refresh loop (~20 fps): capture ➜ reconstruct ➜ display."""
+        """
+        ~20 fps core loop:
+          • Capture pipeline runs only when *acquisition_active* is True
+          • Reconstruction pipeline runs only when *compensating*     is True
+        """
         start = time.time()
 
-        # ---------- A) CAPTURE PIPELINE --------------------------------
-        # build filter list for the live hologram
-        self.filters_c, self.filter_params_c = [], []
-        if self.manual_contrast_c_var.get():
-            self.filters_c += ["contrast"];  self.filter_params_c += [self.contrast_c]
-        if self.manual_gamma_c_var.get():
-            self.filters_c += ["gamma"];     self.filter_params_c += [self.gamma_c]
-        if self.manual_adaptative_eq_c_var.get():
-            self.filters_c += ["adaptative_eq"]; self.filter_params_c += [[]]
-        if self.manual_highpass_c_var.get():
-            self.filters_c += ["highpass"];  self.filter_params_c += [self.highpass_c]
-        if self.manual_lowpass_c_var.get():
-            self.filters_c += ["lowpass"];   self.filter_params_c += [self.lowpass_c]
+        # ── A) CAPTURE PIPELINE ──────────────────────────────────────
+        if self.acquisition_active:
+            # (original capture–pipeline code remains *identical*)
+            self.filters_c, self.filter_params_c = [], []
+            if self.manual_contrast_c_var.get():
+                self.filters_c += ["contrast"];  self.filter_params_c += [self.contrast_c]
+            if self.manual_gamma_c_var.get():
+                self.filters_c += ["gamma"];     self.filter_params_c += [self.gamma_c]
+            if self.manual_adaptative_eq_c_var.get():
+                self.filters_c += ["adaptative_eq"]; self.filter_params_c += [[]]
+            if self.manual_highpass_c_var.get():
+                self.filters_c += ["highpass"];  self.filter_params_c += [self.highpass_c]
+            if self.manual_lowpass_c_var.get():
+                self.filters_c += ["lowpass"];   self.filter_params_c += [self.lowpass_c]
 
-        # send current settings to the capture worker
-        self.update_inputs("capture")
-        if not self.queue_manager["capture"]["input"].full():
-            self.queue_manager["capture"]["input"].put(self.capture_input)
+            self.update_inputs("capture")
+            if not self.queue_manager["capture"]["input"].full():
+                self.queue_manager["capture"]["input"].put(self.capture_input)
 
-        # pull the latest frame (if any) from the worker
-        if not self.queue_manager["capture"]["output"].empty():
-            self.capture_output.update(self.queue_manager["capture"]["output"].get())
-            self.update_outputs("capture")
+            if not self.queue_manager["capture"]["output"].empty():
+                self.capture_output.update(self.queue_manager["capture"]["output"].get())
+                self.update_outputs("capture")
 
-        # ---------- B) RECONSTRUCTION PIPELINE -------------------------
-        # build filter list for reconstruction
-        self.filters_r, self.filter_params_r = [], []
-        if self.manual_contrast_r_var.get():
-            self.filters_r += ["contrast"];  self.filter_params_r += [self.contrast_r]
-        if self.manual_gamma_r_var.get():
-            self.filters_r += ["gamma"];     self.filter_params_r += [self.gamma_r]
-        if self.manual_adaptative_eq_r_var.get():
-            self.filters_r += ["adaptative_eq"]; self.filter_params_r += [[]]
-        if self.manual_highpass_r_var.get():
-            self.filters_r += ["highpass"];  self.filter_params_r += [self.highpass_r]
-        if self.manual_lowpass_r_var.get():
-            self.filters_r += ["lowpass"];   self.filter_params_r += [self.lowpass_r]
+        # ── B) RECONSTRUCTION PIPELINE ───────────────────────────────
+        if self.compensating:
+            self.filters_r, self.filter_params_r = [], []
+            if self.manual_contrast_r_var.get():
+                self.filters_r += ["contrast"];  self.filter_params_r += [self.contrast_r]
+            if self.manual_gamma_r_var.get():
+                self.filters_r += ["gamma"];     self.filter_params_r += [self.gamma_r]
+            if self.manual_adaptative_eq_r_var.get():
+                self.filters_r += ["adaptative_eq"]; self.filter_params_r += [[]]
+            if self.manual_highpass_r_var.get():
+                self.filters_r += ["highpass"];  self.filter_params_r += [self.highpass_r]
+            if self.manual_lowpass_r_var.get():
+                self.filters_r += ["lowpass"];   self.filter_params_r += [self.lowpass_r]
 
-        # push job
-        self.update_inputs("reconstruction")
-        if not self.queue_manager["reconstruction"]["input"].full():
-            self.queue_manager["reconstruction"]["input"].put(self.recon_input)
+            self.update_inputs("reconstruction")
+            if not self.queue_manager["reconstruction"]["input"].full():
+                self.queue_manager["reconstruction"]["input"].put(self.recon_input)
 
-        # pull result
-        if not self.queue_manager["reconstruction"]["output"].empty():
-            self.recon_output.update(self.queue_manager["reconstruction"]["output"].get())
-            self._update_recon_arrays()          # refresh internal buffers
-            self.update_right_view()             # repaint right viewer
+            if not self.queue_manager["reconstruction"]["output"].empty():
+                self.recon_output.update(self.queue_manager["reconstruction"]["output"].get())
+                self._update_recon_arrays()
+                self.update_right_view()
 
-        # ---------- C) PROFILING --------------------------------------
+        # ── C) PROFILING + RECORDING ─────────────────────────────────
         elapsed = time.time() - start
         fps = round(1.0 / elapsed, 1) if elapsed else 0.0
         self.max_w_fps = max(self.max_w_fps, min(fps, 144))
         self.w_fps     = fps or self.max_w_fps
 
-        # update on-screen counters
-        self.w_fps_label.configure(text=f"FPS: {self.w_fps}")
-        self.c_fps_label.configure(text=f"FPS: {self.c_fps}")
-        self.r_fps_label.configure(text=f"FPS: {self.r_fps}")
+        # Updated labels with explicit meanings
+        self.w_fps_label.configure(text=f"GUI FPS: {self.w_fps}")
+        self.c_fps_label.configure(text=f"Preview FPS: {self.c_fps}")
+        self.r_fps_label.configure(text=f"Recon FPS: {self.r_fps}")
 
-        # ---------- C) RECORD THE CURRENT FRAME  ---------------------
-        self._record_current_frame()
+        self._record_current_frame()      # unchanged
 
-        # ---------- D) PROFILING -------------------------------------
-        elapsed = time.time() - start
-        fps = round(1.0 / elapsed, 1) if elapsed else 0.0
-        self.max_w_fps = max(self.max_w_fps, min(fps, 144))
-        self.w_fps     = fps or self.max_w_fps
-
-        self.w_fps_label.configure(text=f"FPS: {self.w_fps}")
-        self.c_fps_label.configure(text=f"FPS: {self.c_fps}")
-        self.r_fps_label.configure(text=f"FPS: {self.r_fps}")
-
-        # schedule next loop
         self._draw_after_id = self.after(50, self.draw)
 
 
@@ -2401,7 +2900,6 @@ class App(ctk.CTk):
         os.system("taskkill /f /im python.exe")
 
     def _build_fps_indicators(self) -> None:
-
         # Called too soon? – postpone and return
         if not hasattr(self, "viewing_frame"):
             self.after_idle(self._build_fps_indicators)
@@ -2415,16 +2913,14 @@ class App(ctk.CTk):
         self.fps_frame.grid(row=2, column=0, sticky="sew", padx=4, pady=(0, 6))
         self.fps_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
-        #      ▸ Whole loop FPS   ▸ Capture FPS   ▸ Recon FPS
-        self.w_fps_label = ctk.CTkLabel(self.fps_frame, text="FPS: 0.0", anchor="w")
-        self.c_fps_label = ctk.CTkLabel(self.fps_frame, text="FPS: 0.0")
-        self.r_fps_label = ctk.CTkLabel(self.fps_frame, text="FPS: 0.0", anchor="e")
+        #      ▸ GUI FPS          ▸ Preview FPS      ▸ Recon FPS
+        self.w_fps_label = ctk.CTkLabel(self.fps_frame, text="GUI FPS: 0.0", anchor="w")
+        self.c_fps_label = ctk.CTkLabel(self.fps_frame, text="Preview FPS: 0.0")
+        self.r_fps_label = ctk.CTkLabel(self.fps_frame, text="Recon FPS: 0.0", anchor="e")
 
         self.w_fps_label.grid(row=0, column=0, sticky="w", padx=(2, 0))
         self.c_fps_label.grid(row=0, column=1)
         self.r_fps_label.grid(row=0, column=2, sticky="e", padx=(0, 2))
-
-
 
 if __name__=='__main__':
     app = App()
