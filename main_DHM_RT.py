@@ -1,4 +1,3 @@
-
 import zipfile, io
 import customtkinter as ctk
 from parallel_rc import *
@@ -193,7 +192,7 @@ class App(ctk.CTk):
 
     def _on_load_select(self, choice: str) -> None:
         """Dispatch the two options from the Load menu."""
-        self._reset_source()  
+        self._reset_source()
 
         if choice == "Init Camera":
             self.source_mode = "camera"
@@ -629,9 +628,9 @@ class App(ctk.CTk):
         self.is_playing = True
         self.play_button.configure(text="⏸ Pause")
 
-        if src == "camera":
-            self._update_realtime()
-            print("inside real time")
+        #if src == "camera":
+        #    self._update_realtime()
+        #    print("inside real time")
 
         self._comp_thread = threading.Thread(
             target=self._comp_worker_loop, args=(src,), daemon=True
@@ -956,14 +955,12 @@ class App(ctk.CTk):
         # Search for available devices
         avail = self._find_available_cameras()
         if not avail:
-            print("[Camera] No cameras available.")
             self._show_camera_error_once("No camera detected – realtime disabled.")
             return None
 
         # Choose preferred camera
         preferred = self._pick_preferred_camera(avail)
         if preferred is None:
-            print("[Camera] No preferred camera found.")
             self._show_camera_error_once("No suitable camera found – realtime disabled.")
             return None
 
@@ -975,6 +972,9 @@ class App(ctk.CTk):
             print(f"[Camera] Could not open camera index {preferred}.")
             self._show_camera_error_once(f"Could not open camera index {preferred}.")
             return None
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, MAX_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, MAX_HEIGHT)
 
         # Test if the camera delivers a frame
         ok, first = cap.read()
@@ -1017,58 +1017,6 @@ class App(ctk.CTk):
 
         return False
 
-    # _update_preview
-    def _update_preview(self) -> None:
-        """Internal loop: grab → show Hologram & FT → (optionally) save."""
-
-        if not self.cap or not self.cap.isOpened():
-            self.after(30, self._update_preview)
-            return
-
-        ok, frame_bgr = self.cap.read()
-        if not ok:
-            self.after(30, self._update_preview)
-            return
-
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-
-        self.last_preview_gray = gray
-
-        # Fourier transform (for display only)
-        ft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(gray.astype(np.float32))))
-        self.last_preview_ft = ft
-        ft_log = (np.log1p(np.abs(ft)) /
-                  np.log1p(np.abs(ft)).max() * 255).astype(np.uint8)
-
-        # Creating thumbnails
-        holo_tk = self._preserve_aspect_ratio(
-            Image.fromarray(gray), self.viewbox_width, self.viewbox_height)
-        ft_tk = self._preserve_aspect_ratio(
-            Image.fromarray(ft_log), self.viewbox_width, self.viewbox_height)
-
-        # Arrays actualization
-        self.hologram_frames = [holo_tk]
-        self.ft_frames = [ft_tk]
-        self.multi_holo_arrays = [gray]
-        self.multi_ft_arrays = [ft_log]
-        self.current_holo_array = gray
-        self.current_ft_array = ft_log
-        self.current_left_index = 0
-
-        # show video
-        try:
-            if self.holo_view_var.get() == "Hologram":
-                self.captured_label.configure(image=holo_tk)
-                self.captured_label.image = holo_tk
-            else:
-                self.captured_label.configure(image=ft_tk)
-                self.captured_label.image = ft_tk
-        except AttributeError as e:
-            print(f"[DEBUG] Error: {e}")
-
-        # Next frame
-        self.after(20, self._update_preview)
-
     def _show_camera_error_once(self, message: str) -> None:
         """Shows a single message box for camera errors."""
         try:
@@ -1101,24 +1049,26 @@ class App(ctk.CTk):
 
     def _preserve_aspect_ratio(self, pil_image: Image.Image, max_width: int, max_height: int) -> ImageTk.PhotoImage:
         """
-        Scales 'pil_image' down (never up) to fit within (max_width x max_height),
-        preserving the original aspect ratio. Returns the resulting PhotoImage.
+        Resize 'pil_image' to fit within (max_width x max_height),
+        preserving aspect ratio. The image is scaled down (never up).
+        Returns a PhotoImage that fits the space with possible black borders.
         """
         original_w, original_h = pil_image.size
 
-        # If smaller or equal, no upscaling (unless you want to allow it).
-        if original_w <= max_width and original_h <= max_height:
-            resized = pil_image
-        else:
-            # We shrink to keep the aspect ratio correct
-            ratio_w = max_width / float(original_w)
-            ratio_h = max_height / float(original_h)
-            scale_factor = min(ratio_w, ratio_h)
-            new_w = int(original_w * scale_factor)
-            new_h = int(original_h * scale_factor)
-            resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        scale = min(max_width / original_w, max_height / original_h)
+        new_w = int(original_w * scale)
+        new_h = int(original_h * scale)
 
-        return ImageTk.PhotoImage(resized)
+        resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        canvas_mode = pil_image.mode if pil_image.mode in ["RGB", "L"] else "RGB"
+        canvas = Image.new(canvas_mode, (max_width, max_height), color=0 if canvas_mode == "L" else (0, 0, 0))
+
+        offset_x = (max_width - new_w) // 2
+        offset_y = (max_height - new_h) // 2
+        canvas.paste(resized, (offset_x, offset_y))
+
+        return ImageTk.PhotoImage(canvas)
 
     def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ImageTk.PhotoImage:
         max_width, max_height = self.viewbox_width, self.viewbox_height
