@@ -306,14 +306,14 @@ class App(ctk.CTk):
         • `_build_nav_and_toolbar()`   → left strip and the top toolbar
         • `_build_two_views_panel()`   → side-by-side image viewers
         """
-        self._build_navigation_strip()   # creates navigation_frame & viewing_frame
-        fGUI.build_toolbar(self)          
+        self._build_navigation_strip()  # creates navigation_frame & viewing_frame
+        fGUI.build_toolbar(self)
         fGUI.build_two_views_panel(self)
 
     def _build_navigation_strip(self) -> None:
         """Left column with the ‘DHM Processing Methods’ buttons."""
         # Shared geometry
-        self.viewbox_width  = 600
+        self.viewbox_width = 600
         self.viewbox_height = 500
 
         # Left strip
@@ -401,14 +401,14 @@ class App(ctk.CTk):
         if 0 <= u < arr_w and 0 <= v < arr_h:
             self.ft_coord_label.configure(text=f"({u}, {v})")
             self.ft_coord_label.configure(text=f"(fx:{u}, fy:{v})")
-            self.ft_coord_label.lift()           # keep it on top
+            self.ft_coord_label.lift()  # keep it on top
 
     def _on_theme_select(self, choice: str) -> None:
         """Handle Light / Dark selection and restore placeholder text."""
         if choice in ("Light", "Dark"):
             ctk.set_appearance_mode(choice)
             self._sync_canvas_and_frame_bg()
-        self.theme_menu.set("Theme")     # keep the label constant
+        self.theme_menu.set("Theme")  # keep the label constant
 
     def _on_tools_select(self, choice: str) -> None:
         """Direct handler for the toolbar Tools-menu."""
@@ -454,10 +454,10 @@ class App(ctk.CTk):
             )
         menu.tk_popup(self.ft_mode_button.winfo_rootx(),
                       self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
-        
+
     def get_load_menu_values(self):
-     return ["Hologram", "Stack of holograms", "Sample"]
-    
+        return ["Hologram", "Stack of holograms", "Sample"]
+
     def _on_load_select(self, choice: str) -> None:
         """Handle selections from the Load drop-down."""
         if choice == "Hologram":
@@ -609,7 +609,7 @@ class App(ctk.CTk):
                 )
                 self.captured_title_label.configure(text="Fourier Transform")
                 self.captured_label.configure(image=tk_ft)
-                self.captured_label.image = tk_ft # type: ignore
+                self.captured_label.image = tk_ft  # type: ignore
                 self.current_ft_array = ft_disp
             return
 
@@ -630,7 +630,7 @@ class App(ctk.CTk):
             )
             self.captured_title_label.configure(text="Fourier Transform")
             self.captured_label.configure(image=tk_ft)
-            self.captured_label.image = tk_ft # type: ignore
+            self.captured_label.image = tk_ft  # type: ignore
             self.current_ft_array = ft_disp
 
         # Keep all original arrow / UI-state logic
@@ -659,7 +659,7 @@ class App(ctk.CTk):
             self.dimensions_var.set(2)
             if hasattr(self, 'current_phase_index'):
                 tGUI.load_ui_from_filter_state(self, dimension=2, index=self.current_phase_index)
- 
+
         else:  # Amplitude
             if hasattr(self, 'amplitude_arrays') and self.amplitude_arrays:
                 idx = getattr(self, 'current_amp_index', 0)
@@ -674,11 +674,11 @@ class App(ctk.CTk):
                     self.processed_label.image = tk_amp
             else:
                 self.processed_label.configure(image=self.img_black)
- 
+
             self.dimensions_var.set(1)
             if hasattr(self, 'current_amp_index'):
                 tGUI.load_ui_from_filter_state(self, dimension=2, index=self.current_amp_index)
- 
+
         self._update_distance_label()
 
     def zoom_holo_view(self, *args, **kwargs):
@@ -1094,14 +1094,14 @@ class App(ctk.CTk):
 
     def _save_single_array(self, arr8: np.ndarray,
                            dialog_title: str = "Save",
-                           default_name:  str = "") -> None:
+                           default_name: str = "") -> None:
 
         filetypes = [("MATLAB files", "*.mat"),
-                     ("PNG files",    "*.png"),
-                     ("BMP files",    "*.bmp"),
-                     ("JPEG files",   "*.jpg"),
-                     ("TIFF files",   "*.tif"),
-                     ("All files",    "*.*")]
+                     ("PNG files", "*.png"),
+                     ("BMP files", "*.bmp"),
+                     ("JPEG files", "*.jpg"),
+                     ("TIFF files", "*.tif"),
+                     ("All files", "*.*")]
         path = filedialog.asksaveasfilename(
             title=dialog_title,
             initialfile=default_name,
@@ -1148,7 +1148,7 @@ class App(ctk.CTk):
             lab = tk.Label(extension_win, text="Pick format (png, bmp, jpg, etc.):")
             lab.pack(pady=10)
             fmt_var = tk.StringVar(value="png")
-            fmt_entry = tk.Entry(extension_win, textvariable=fmt_var, width=10, font=("Helvetica",14))
+            fmt_entry = tk.Entry(extension_win, textvariable=fmt_var, width=10, font=("Helvetica", 14))
             fmt_entry.pack(pady=5)
 
             def confirm_fmt():
@@ -1254,9 +1254,9 @@ class App(ctk.CTk):
             y_px = np.linspace(0, height_px, 5)
 
             ax.set_xticks(x_px)
-            ax.set_xticklabels([f"{x*μm_per_px:.1f}" for x in x_px])
+            ax.set_xticklabels([f"{x * μm_per_px:.1f}" for x in x_px])
             ax.set_yticks(y_px)
-            ax.set_yticklabels([f"{y*μm_per_px:.1f}" for y in y_px])
+            ax.set_yticklabels([f"{y * μm_per_px:.1f}" for y in y_px])
 
             ax.set_xlim(0, width_px)
             ax.set_ylim(height_px, 0)
@@ -1304,7 +1304,7 @@ class App(ctk.CTk):
         nav_bar.pack(fill="x", expand=True)
         nav_bar.configure(width=width)
         nav_bar.grid_columnconfigure((0, 1, 2), weight=1, uniform="nav")
- 
+
         def _make_btn(text: str, target: str, col: int) -> None:
             btn = ctk.CTkButton(
                 nav_bar, text=text,
@@ -1320,14 +1320,14 @@ class App(ctk.CTk):
             if target == current:
                 btn.configure(state="disabled", fg_color=("gray60", "gray10"))
             btn.grid(row=0, column=col, sticky="nsew", padx=(1 if col else 0, 1))
- 
-        _make_btn("Phase\nCompensation",    "phase_compensation",    0)
-        _make_btn("Phase\nShifting",        "phase_shifting",        1)
+
+        _make_btn("Phase\nCompensation", "phase_compensation", 0)
+        _make_btn("Phase\nShifting", "phase_shifting", 1)
         _make_btn("Numerical\nPropagation", "numerical_propagation", 2)
 
-# --------------------------------------------------------------------------
-# --------------------- Phase-Shifting--------------------------------------
-# --------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # --------------------- Phase-Shifting--------------------------------------
+    # --------------------------------------------------------------------------
     def init_phase_shifting_frame(self):
         """
         Initializes the user interface for phase-shifting parameters and method selection.
@@ -1556,7 +1556,7 @@ class App(ctk.CTk):
         self.compensation_source = "ps"
 
         self.propagate_widgets_ps["propagation_apply_button"].configure(
-            command=self._apply_propagation
+            command=lambda: self._apply_propagation(request_magnification=True)
         )
 
         # Update scroll region
@@ -1700,8 +1700,8 @@ class App(ctk.CTk):
         self.original_amplitude_arrays = [amp_norm.copy()]
         self.original_phase_arrays = [phase_8bit.copy()]
 
-        self.filter_states_dim1 = [tGUI.default_filter_state()]  # amplitude index=0
-        self.filter_states_dim2 = [tGUI.default_filter_state()]  # phase index=0
+        self.filter_states_dim1 = [tGUI.default_filter_state()]
+        self.filter_states_dim2 = [tGUI.default_filter_state()]
 
         self.amplitude_frames = [tk_amp]
         self.phase_frames = [tk_phs]
@@ -1746,17 +1746,17 @@ class App(ctk.CTk):
             label_msg.configure(text="Select a method:")
 
     def _set_unit_in_label(self, lbl, unit):
-      text_now = lbl.cget("text")
-      base = text_now.split("(")[0].strip()
-      lbl.configure(text=f"{base} ({unit})")
-      if "Wavelength" in base:
-          self.wavelength_unit = unit
-      elif "Pitch X" in base:
-          self.pitch_x_unit = unit
-      elif "Pitch Y" in base:
-          self.pitch_y_unit = unit
-      elif "Distance" in base:
-          self.distance_unit = unit
+        text_now = lbl.cget("text")
+        base = text_now.split("(")[0].strip()
+        lbl.configure(text=f"{base} ({unit})")
+        if "Wavelength" in base:
+            self.wavelength_unit = unit
+        elif "Pitch X" in base:
+            self.pitch_x_unit = unit
+        elif "Pitch Y" in base:
+            self.pitch_y_unit = unit
+        elif "Distance" in base:
+            self.distance_unit = unit
 
     # Phase Compensation
     def init_phase_compensation_frame(self):
@@ -1999,7 +1999,7 @@ class App(ctk.CTk):
         )
 
         self.propagate_widgets_pc["propagation_apply_button"].configure(
-            command=self._apply_propagation
+            command=lambda: self._apply_propagation(request_magnification=True)
         )
 
         # widgets activation
@@ -2158,15 +2158,15 @@ class App(ctk.CTk):
         if u == "µm":
             return value_um
         if u == "nm":
-            return value_um*1e3
+            return value_um * 1e3
         if u == "mm":
-            return value_um/1e3
+            return value_um / 1e3
         if u == "cm":
-            return value_um/1e4
+            return value_um / 1e4
         if u == "m":
-            return value_um/1e6
+            return value_um / 1e6
         if u == "in":
-            return value_um/25_400.0
+            return value_um / 25_400.0
         return value_um
 
     def _on_slider_moved(self, val):
@@ -2185,7 +2185,7 @@ class App(ctk.CTk):
 
         self._propagate_current_field(distance_um)
 
-    def _apply_propagation(self):
+    def _apply_propagation(self, request_magnification):
         """
         Handle Apply button click for different propagation modes.
         """
@@ -2195,19 +2195,27 @@ class App(ctk.CTk):
         unit_scales = {"µm": 1.0, "mm": 1000.0, "cm": 10000.0}
 
         # Read lateral magnification
-        try:
-            mag_entry = widgets["propagation_magnification"]
-            M = float(mag_entry.get().replace("x", "").strip())
-            if M <= 0:
+        if request_magnification:
+            try:
+                mag_entry = widgets["propagation_magnification"]
+                M = float(mag_entry.get().replace("x", "").strip())
+                if M <= 0:
+                    messagebox.showinfo(
+                        "Information",
+                        "Please enter a valid magnification value."
+                    )
+                    return
+                self.magnification = M
+            except Exception:
                 messagebox.showinfo(
                     "Information",
                     "Please enter a valid magnification value."
                 )
-        except Exception:
-            messagebox.showinfo(
-                "Information",
-                "Please enter a valid magnification value."
-            )
+                return
+            M = self.magnification
+        else:
+            self.magnification = 1.0
+            M = self.magnification
 
         # Scale factor for the magnification
         scale_img = M ** 2
@@ -2363,7 +2371,7 @@ class App(ctk.CTk):
 
             import threading
             threading.Thread(target=run_autofocus_in_thread, daemon=True).start()
-            
+
     def _propagate_current_field(self, distance_um: float):
         """
         Propagate current complex field to the given distance.
@@ -2520,7 +2528,7 @@ class App(ctk.CTk):
         self.active_propagate_widgets = self.propagate_widgets_np
         self.compensation_source = "np"
 
-    def _cache_compensation_params(self,wavelength_um: float,dx_um: float,dy_um: float) -> None:
+    def _cache_compensation_params(self, wavelength_um: float, dx_um: float, dy_um: float) -> None:
         self.wavelength = wavelength_um
         self.pitch_x = dx_um
         self.pitch_y = dy_um
@@ -2565,7 +2573,7 @@ class App(ctk.CTk):
         w_val = self.wavelength
         px_val = self.dx
         py_val = self.dy
-        
+
         self._cache_compensation_params(w_val, px_val, py_val)
 
         # Spatial-filter choice
@@ -2608,8 +2616,8 @@ class App(ctk.CTk):
 
         # canonicalise legacy names so the rest of the pipeline keeps working
         alias = {
-            "Circular Manual":      "Manual Circular",
-            "Rectangle Manual":   "Manual Rectangle",
+            "Circular Manual": "Manual Circular",
+            "Rectangle Manual": "Manual Rectangle",
             "Non Telecentric Manual": "No Telecentric",
         }
         selected_filter = alias.get(selected_filter, selected_filter)
@@ -2623,18 +2631,22 @@ class App(ctk.CTk):
         method = self.pc_method_var.get()
         if method == 0:
             comp_output = pyDHM.ERS(inp=self.arr_hologram, wavelength=self.wavelength, dx=self.dx,
-                dy=self.dy, s=5, step=0.2, filter_type=self.spatial_filter_var_pc.get(), manual_coords=self.manual_coords,
-                filtering_function=self.custom_filtering_function)
+                                    dy=self.dy, s=5, step=0.2, filter_type=self.spatial_filter_var_pc.get(),
+                                    manual_coords=self.manual_coords,
+                                    filtering_function=self.custom_filtering_function)
         elif method == 1:
             comp_output = pyDHM.CFS(inp=self.arr_hologram, wavelength=self.wavelength, dx=self.dx,
-                dy=self.dy, filter_type=self.spatial_filter_var_pc.get(), manual_coords=self.manual_coords,
-                spatial_filtering_fn=self.custom_filtering_function)
+                                    dy=self.dy, filter_type=self.spatial_filter_var_pc.get(),
+                                    manual_coords=self.manual_coords,
+                                    spatial_filtering_fn=self.custom_filtering_function)
         elif method == 2:
             chosen_filter = self.spatial_filter_var_pc.get()
             comp_output = self.CNT(self.arr_hologram, self.wavelength, self.dx, self.dy, chosen_filter)
         elif method == 3:
-            comp_output = pyDHM.vortexLegendre(inp=self.arr_hologram, wavelength=self.wavelength, dx=self.dx, dy=self.dy, limit=256/2, filter_type=self.spatial_filter_var_pc.get(), manual_coords=self.manual_coords,
-                spatial_filtering_fn=self.custom_filtering_function)
+            comp_output = pyDHM.vortexLegendre(inp=self.arr_hologram, wavelength=self.wavelength, dx=self.dx,
+                                               dy=self.dy, limit=256 / 2, filter_type=self.spatial_filter_var_pc.get(),
+                                               manual_coords=self.manual_coords,
+                                               spatial_filtering_fn=self.custom_filtering_function)
         else:
             print("Unknown phase compensation method.")
             return
@@ -2696,16 +2708,16 @@ class App(ctk.CTk):
 
     def CNT(self, inp, wavelength, dx, dy, spatialFilter=None):
         # Unids to microns
-        wavelength_m = wavelength*1e-6
-        dx_m = dx*1e-6
-        dy_m = dy*1e-6
-        k = (2*np.pi)/wavelength_m
+        wavelength_m = wavelength * 1e-6
+        dx_m = dx * 1e-6
+        dy_m = dy * 1e-6
+        k = (2 * np.pi) / wavelength_m
 
         inp = np.array(inp)
         M, N = inp.shape
         x = np.arange(0, N, 1)
         y = np.arange(0, M, 1)
-        X, Y = np.meshgrid(x-(N/2), y-(M/2), indexing='xy')
+        X, Y = np.meshgrid(x - (N / 2), y - (M / 2), indexing='xy')
 
         # Manuel spatial filter
         if spatialFilter == "Non Telecentric Manual":
@@ -2718,10 +2730,10 @@ class App(ctk.CTk):
             return None
         print("CNT: Filtrado finalizado.")
 
-        ThetaXM = math.asin((N/2 - Xcenter)*wavelength_m/(M*dx_m))
-        ThetaYM = math.asin((M/2 - Ycenter)*wavelength_m/(N*dy_m))
-        reference = np.exp(1j*k*((math.sin(ThetaXM)*X*dx_m)+(math.sin(ThetaYM)*Y*dy_m)))
-        comp_phase = holo_filter*reference
+        ThetaXM = math.asin((N / 2 - Xcenter) * wavelength_m / (M * dx_m))
+        ThetaYM = math.asin((M / 2 - Ycenter) * wavelength_m / (N * dy_m))
+        reference = np.exp(1j * k * ((math.sin(ThetaXM) * X * dx_m) + (math.sin(ThetaYM) * Y * dy_m)))
+        comp_phase = holo_filter * reference
         phase_c = np.angle(comp_phase)
 
         minVal = phase_c.min()
@@ -2730,23 +2742,23 @@ class App(ctk.CTk):
             print("CNT: Fase degenerada. No se puede compensar.")
             return comp_phase
 
-        phase_norm = (phase_c - minVal)/(maxVal-minVal)
+        phase_norm = (phase_c - minVal) / (maxVal - minVal)
         binary_phase = (phase_norm > 0.2)
 
-        m = abs(ROI_array[2]-ROI_array[0])
-        n = abs(ROI_array[3]-ROI_array[1])
-        Cx = (M*dx_m)**2/(wavelength_m*m) if m else 1
-        Cy = (N*dy_m)**2/(wavelength_m*n) if n else 1
-        cur = (Cx+Cy)/2
+        m = abs(ROI_array[2] - ROI_array[0])
+        n = abs(ROI_array[3] - ROI_array[1])
+        Cx = (M * dx_m) ** 2 / (wavelength_m * m) if m else 1
+        Cy = (N * dy_m) ** 2 / (wavelength_m * n) if n else 1
+        cur = (Cx + Cy) / 2
 
         print("CNT: Necesitas el centro de la fase circular en la imagen binarizada.")
         print("Lo normal es implementarlo con input() o un click manual, Code1 pide input.")
-        p = (M/2)  # simplifícalo si no quieres input
-        q = (N/2)
+        p = (M / 2)  # simplifícalo si no quieres input
+        q = (N / 2)
         # Por brevedad, no pido input real.
 
-        f = ((M/2)-p)/2
-        g = ((N/2)-q)/2
+        f = ((M / 2) - p) / 2
+        g = ((N / 2) - q) / 2
 
         print("CNT: Inicia búsqueda gruesa ...")
         cont = 0
@@ -2754,24 +2766,24 @@ class App(ctk.CTk):
         s = 100
         step = 50
         perc = 0.4
-        arrayCurv = np.arange(cur-(cur*perc), cur+(cur*perc), (cur*perc)/6.0)
-        arrayXc = np.arange(f-s, f+s, step)
-        arrayYc = np.arange(g-s, g+s, step)
+        arrayCurv = np.arange(cur - (cur * perc), cur + (cur * perc), (cur * perc) / 6.0)
+        arrayXc = np.arange(f - s, f + s, step)
+        arrayYc = np.arange(g - s, g + s, step)
         for ctemp in arrayCurv:
             for ftemp in arrayXc:
                 for gtemp in arrayYc:
                     cont += 1
-                    phi_sph = ((X - ftemp)**2*(dx_m**2)/ctemp)+((Y - gtemp)**2*(dy_m**2)/ctemp)
-                    phi_sph = np.exp(-1j*(np.pi*phi_sph/wavelength_m))
-                    phaseComp = np.angle(comp_phase*phi_sph)
+                    phi_sph = ((X - ftemp) ** 2 * (dx_m ** 2) / ctemp) + ((Y - gtemp) ** 2 * (dy_m ** 2) / ctemp)
+                    phi_sph = np.exp(-1j * (np.pi * phi_sph / wavelength_m))
+                    phaseComp = np.angle(comp_phase * phi_sph)
                     pmin = phaseComp.min()
                     pmax = phaseComp.max()
-                    if abs(pmax-pmin)<1e-9:
+                    if abs(pmax - pmin) < 1e-9:
                         continue
-                    ph_sca = (phaseComp-pmin)/(pmax-pmin)
-                    bin_sc = (ph_sca>0.2)
+                    ph_sca = (phaseComp - pmin) / (pmax - pmin)
+                    bin_sc = (ph_sca > 0.2)
                     ssum = np.sum(bin_sc)
-                    if ssum>sum_max:
+                    if ssum > sum_max:
                         sum_max = ssum
                         f_out = ftemp
                         g_out = gtemp
@@ -2780,36 +2792,36 @@ class App(ctk.CTk):
         cont = 0
         sum_max = 0
         s = 10
-        step=2
-        perc=0.1
+        step = 2
+        perc = 0.1
         arrayXc = np.arange(f_out - s, f_out + s, step)
         arrayYc = np.arange(g_out - s, g_out + s, step)
-        arrayCurv = np.arange(cur_out-(cur_out*perc), cur_out+(cur_out*perc), 0.01)
+        arrayCurv = np.arange(cur_out - (cur_out * perc), cur_out + (cur_out * perc), 0.01)
 
         for ctemp in arrayCurv:
             for ftemp in arrayXc:
                 for gtemp in arrayYc:
-                    cont+=1
-                    phi_sph = ((X - ftemp)**2*(dx_m**2)/ctemp)+((Y - gtemp)**2*(dy_m**2)/ctemp)
-                    phi_sph = np.exp(-1j*(np.pi*phi_sph/wavelength_m))
-                    phaseComp = np.angle(comp_phase*phi_sph)
+                    cont += 1
+                    phi_sph = ((X - ftemp) ** 2 * (dx_m ** 2) / ctemp) + ((Y - gtemp) ** 2 * (dy_m ** 2) / ctemp)
+                    phi_sph = np.exp(-1j * (np.pi * phi_sph / wavelength_m))
+                    phaseComp = np.angle(comp_phase * phi_sph)
                     pmin = phaseComp.min()
                     pmax = phaseComp.max()
-                    if abs(pmax-pmin)<1e-9:
+                    if abs(pmax - pmin) < 1e-9:
                         continue
-                    ph_sca = (phaseComp-pmin)/(pmax-pmin)
-                    bin_sc = (ph_sca>0.2)
+                    ph_sca = (phaseComp - pmin) / (pmax - pmin)
+                    bin_sc = (ph_sca > 0.2)
                     ssum = np.sum(bin_sc)
-                    if ssum>sum_max:
+                    if ssum > sum_max:
                         sum_max = ssum
                         f_out = ftemp
                         g_out = gtemp
                         cur_out = ctemp
 
         # Initial phase
-        phi_sph = ((X - f_out)**2*(dx_m**2)/cur_out)+((Y - g_out)**2*(dy_m**2)/cur_out)
-        phi_sph = np.exp(-1j*(np.pi*phi_sph/wavelength_m))
-        phaseCompensate = comp_phase*phi_sph
+        phi_sph = ((X - f_out) ** 2 * (dx_m ** 2) / cur_out) + ((Y - g_out) ** 2 * (dy_m ** 2) / cur_out)
+        phi_sph = np.exp(-1j * (np.pi * phi_sph / wavelength_m))
+        phaseCompensate = comp_phase * phi_sph
 
         print("CNT: Fase compensada completada.")
         return phaseCompensate
@@ -2823,19 +2835,19 @@ class App(ctk.CTk):
         holoFT = np.float32(inp)
         fft_holo = cv2.dft(holoFT, flags=cv2.DFT_COMPLEX_OUTPUT)
         fft_holo = np.fft.fftshift(fft_holo)
-        fft_holo_image = 20*np.log(cv2.magnitude(fft_holo[:,:,0], fft_holo[:,:,1]))
+        fft_holo_image = 20 * np.log(cv2.magnitude(fft_holo[:, :, 0], fft_holo[:, :, 1]))
         mini = np.amin(np.abs(fft_holo_image))
         maxi = np.amax(np.abs(fft_holo_image))
         fft_holo_image = cv2.convertScaleAbs(fft_holo_image,
-            alpha=255.0/(maxi-mini), beta=-mini*255.0/(maxi-mini))
+                                             alpha=255.0 / (maxi - mini), beta=-mini * 255.0 / (maxi - mini))
 
         ROI = cv2.selectROI("Seleccione ROI - No Telecentric", fft_holo_image, fromCenter=True)
         cv2.destroyWindow("Seleccione ROI - No Telecentric")
 
         x1_ROI = int(ROI[0])
         y1_ROI = int(ROI[1])
-        x2_ROI = int(ROI[0]+ROI[2])
-        y2_ROI = int(ROI[1]+ROI[3])
+        x2_ROI = int(ROI[0] + ROI[2])
+        y2_ROI = int(ROI[1] + ROI[3])
 
         ROI_array[0] = y1_ROI
         ROI_array[1] = x1_ROI
@@ -2843,17 +2855,17 @@ class App(ctk.CTk):
         ROI_array[3] = x2_ROI
 
         # Center
-        Ycenter = (y1_ROI + y2_ROI)/2.0
-        Xcenter = (x1_ROI + x2_ROI)/2.0
+        Ycenter = (y1_ROI + y2_ROI) / 2.0
+        Xcenter = (x1_ROI + x2_ROI) / 2.0
 
-        holo_filterFT = np.zeros((M,N,2), np.float32)
+        holo_filterFT = np.zeros((M, N, 2), np.float32)
         holo_filterFT[y1_ROI:y2_ROI, x1_ROI:x2_ROI] = 1.0
-        holo_filterFT = holo_filterFT*fft_holo
+        holo_filterFT = holo_filterFT * fft_holo
         holo_filterFT = np.fft.ifftshift(holo_filterFT)
         holo_filter_spatial = cv2.idft(holo_filterFT, flags=cv2.DFT_INVERSE)
-        real_part = holo_filter_spatial[:,:,0]
-        imag_part = holo_filter_spatial[:,:,1]
-        holo_filter = real_part+1j*imag_part
+        real_part = holo_filter_spatial[:, :, 0]
+        imag_part = holo_filter_spatial[:, :, 1]
+        holo_filter = real_part + 1j * imag_part
 
         return Xcenter, Ycenter, holo_filter, ROI_array
 
@@ -2865,7 +2877,7 @@ class App(ctk.CTk):
         minVal = np.amin(np.abs(fft_holo_image))
         maxVal = np.amax(np.abs(fft_holo_image))
         fft_holo_image = cv2.convertScaleAbs(fft_holo_image, alpha=255.0 / (maxVal - minVal),
-                                          beta=-minVal * 255.0 / (maxVal - minVal))
+                                             beta=-minVal * 255.0 / (maxVal - minVal))
 
         ret, thresh = cv2.threshold(fft_holo_image, 200, 255, cv2.THRESH_BINARY)
         thresh_rize = cv2.resize(thresh, (1024, 1024))
@@ -2874,7 +2886,7 @@ class App(ctk.CTk):
         fft_holo_image = cv2.resize(thresh, (1024, 1024))
         image_copy = fft_holo_image.copy()
         cv2.drawContours(image=image_copy, contours=contours, contourIdx=-1, color=(0, 255, 0), thickness=2,
-                      lineType=cv2.LINE_AA)
+                         lineType=cv2.LINE_AA)
 
         orders = len(contours)
         return orders, thresh
@@ -3106,7 +3118,7 @@ class App(ctk.CTk):
         self.compensation_source = "np"
 
         self.propagate_widgets_np["propagation_apply_button"].configure(
-            command=self._apply_propagation_np
+            command=lambda: self._apply_propagation(request_magnification=False)
         )
 
         # final canvas refresh
@@ -3133,6 +3145,8 @@ class App(ctk.CTk):
                 )
                 return
 
+            self._apply_propagation()
+
         elif source == 1:
             print("[DEBUG] Working with coherent image")
 
@@ -3150,6 +3164,7 @@ class App(ctk.CTk):
                 return
 
             self._load_and_display_coherent_image()
+            self._apply_propagation()
 
         try:
             w_val = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)
@@ -3331,9 +3346,9 @@ class App(ctk.CTk):
             self.speckles_frame.grid_forget()
 
     def _sync_canvas_and_frame_bg(self):
-        mode  = ctk.get_appearance_mode()
+        mode = ctk.get_appearance_mode()
         color = "gray15" if mode == "Dark" else "gray85"
- 
+
         # Canvases
         for canvas_attr in [
             "filters_canvas", "tools_canvas", "param_canvas",
@@ -3342,7 +3357,7 @@ class App(ctk.CTk):
             canvas = getattr(self, canvas_attr, None)
             if canvas is not None:
                 canvas.configure(background=color)
- 
+
         # Frames
         for frame_attr in [
             "filters_frame", "filters_container", "filters_inner_frame",
@@ -3378,7 +3393,8 @@ class App(ctk.CTk):
     def release(self):
         os.system("taskkill /f /im python.exe")
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     app = App()
     app.mainloop()
     app.release()
