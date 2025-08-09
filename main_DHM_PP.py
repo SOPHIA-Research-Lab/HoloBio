@@ -1332,7 +1332,7 @@ class App(ctk.CTk):
         """
         Initializes the user interface for phase-shifting parameters and method selection.
         """
-        # ────────────── MAIN CONTAINER ──────────────
+        # MAIN CONTAINER
         # Create the outer frame for the phase-shifting section
         self.phase_shifting_frame = ctk.CTkFrame(self, corner_radius=8)
         self.phase_shifting_frame.grid_propagate(False)
@@ -1672,6 +1672,11 @@ class App(ctk.CTk):
             return
 
         self.compensated_field_complex = comp_output.copy()
+        self.complex_fields = [comp_output]
+        self.current_amp_index = 0
+        self.current_phase_index = 0
+        self.original_complex_fields = [comp_output.copy()]
+        self.complex_fields = [comp_output.copy()]
 
         # Compute amplitude & phase
         amp = np.abs(comp_output)
@@ -2657,6 +2662,8 @@ class App(ctk.CTk):
 
         # Store the compensated complex field for reuse
         self.compensated_field_complex = comp_output.copy()
+        self.original_complex_fields = [comp_output.copy()]
+        self.complex_fields = [comp_output.copy()]
 
         if not hasattr(self, "complex_fields"):
             self.complex_fields = []
@@ -2753,10 +2760,8 @@ class App(ctk.CTk):
 
         print("CNT: Necesitas el centro de la fase circular en la imagen binarizada.")
         print("Lo normal es implementarlo con input() o un click manual, Code1 pide input.")
-        p = (M / 2)  # simplifícalo si no quieres input
+        p = (M / 2)
         q = (N / 2)
-        # Por brevedad, no pido input real.
-
         f = ((M / 2) - p) / 2
         g = ((N / 2) - q) / 2
 
@@ -3164,7 +3169,7 @@ class App(ctk.CTk):
                 return
 
             self._load_and_display_coherent_image()
-            self._apply_propagation()
+            self._apply_propagation(request_magnification=True)
 
         try:
             w_val = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)

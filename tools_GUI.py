@@ -16,9 +16,7 @@ from scipy.ndimage import uniform_filter, median_filter, gaussian_filter
 import tkinter as tk
 
 
-# ─────────────────────────────────────────────
 # Apply Dimension in Bio-Analysis Frame
-# ─────────────────────────────────────────────
 def apply_dimensions(app):
     if not getattr(app, "phase_arrays", []):
         messagebox.showinfo(
@@ -151,9 +149,7 @@ def apply_dimensions(app):
     plt.show(block=False)
 
 
-# ─────────────────────────────────────────────
 # Scale bar options inside Dimension in Bio-Analysis Frame
-# ─────────────────────────────────────────────
 def wire_scalebar_interaction(fig, ax, bar_line, bar_text, microns_per_pixel, busy_flag):
     MARGIN = 15
     current_len_um = [float(bar_text.get_text().split()[0])]
@@ -235,9 +231,7 @@ def wire_scalebar_interaction(fig, ax, bar_line, bar_text, microns_per_pixel, bu
     fig.canvas.mpl_connect("button_press_event", _on_press_any)
 
 
-# ─────────────────────────────────────────────
 # Apply QPI in Bio-Analysis Frame
-# ─────────────────────────────────────────────
 def apply_QPI(app):
     if not getattr(app, "phase_arrays", []):
         messagebox.showinfo(
@@ -441,9 +435,7 @@ def apply_QPI(app):
     show_dataframe_in_table(app, pd.DataFrame(rows), "QPI results")
 
 
-# ─────────────────────────────────────────────
 # Apply Microstructures Metrics in Bio-Analysis Frame
-# ─────────────────────────────────────────────
 def apply_microstructure(app):
     if not getattr(app, "phase_arrays", []):
         messagebox.showinfo(
@@ -540,9 +532,7 @@ def apply_microstructure(app):
         )
 
 
-# ─────────────────────────────────────────────
 # Apply Filters
-# ─────────────────────────────────────────────
 def apply_filters(self):
     sel = self.filters_dimensions_var.get()
     if sel == 0:
@@ -605,9 +595,7 @@ def apply_filters(self):
     update_colormap_display(self)
 
 
-# ─────────────────────────────────────────────
 # Filters to arrays in Apply Filters
-# ─────────────────────────────────────────────
 def apply_all_filters_to_array(self, arr):
     """
     Applies all enabled filters (Gamma, Contrast, High-pass, Low-pass, Adaptive Equalization)
@@ -619,21 +607,21 @@ def apply_all_filters_to_array(self, arr):
     Returns:
         np.ndarray: Filtered image array, clipped to [0, 255].
     """
-    out = arr.copy()  # Create a copy to preserve original input
+    out = arr.copy()
 
-    # ─── Apply Gamma Correction ─────────────────────────────────────────────
+    # Apply Gamma Correction
     if self.gamma_checkbox_var.get():
         gamma_val = max(float(self.gamma_slider.get()), 1e-8)
         normed = out / (out.max() + 1e-9)
         out = np.power(normed, 1.0 / gamma_val) * 255.0
 
-    # ─── Apply Contrast Adjustment ──────────────────────────────────────────
+    # Apply Contrast Adjustment
     if self.contrast_checkbox_var.get():
         cont_val = float(self.contrast_slider.get())
         mean_val = np.mean(out)
         out = (out - mean_val) * cont_val + mean_val
 
-    # ─── Apply High-Pass Filter in Frequency Domain ─────────────────────────
+    # Apply High-Pass Filter in Frequency Domain
     if self.highpass_checkbox_var.get():
         cutoff = float(self.highpass_slider.get())
         f = np.fft.fft2(out)
@@ -652,7 +640,7 @@ def apply_all_filters_to_array(self, arr):
         fshift *= mask
         out = np.real(np.fft.ifft2(np.fft.ifftshift(fshift)))
 
-    # ─── Apply Low-Pass Filter in Frequency Domain ──────────────────────────
+    # Apply Low-Pass Filter in Frequency Domain
     if self.lowpass_checkbox_var.get():
         cutoff = float(self.lowpass_slider.get())
         f = np.fft.fft2(out)
@@ -671,19 +659,19 @@ def apply_all_filters_to_array(self, arr):
         fshift *= mask
         out = np.real(np.fft.ifft2(np.fft.ifftshift(fshift)))
 
-    # ─── Apply Adaptive Histogram Equalization ──────────────────────────────
+    # Apply Adaptive Histogram Equalization
     if self.adaptative_eq_checkbox_var.get():
         arr_min, arr_max = out.min(), out.max()
-        scaled = (out - arr_min) / (arr_max - arr_min + 1e-9)  # Normalize to [0, 1]
+        scaled = (out - arr_min) / (arr_max - arr_min + 1e-9)
 
         hist, bins = np.histogram(scaled.flatten(), 256, [0, 1])
-        cdf = hist.cumsum() / hist.sum()  # Cumulative distribution function
+        cdf = hist.cumsum() / hist.sum()
 
-        eq = np.interp(scaled.flatten(), bins[:-1], cdf)  # Histogram equalization
-        out = eq.reshape(out.shape) * (arr_max - arr_min) + arr_min  # Rescale back
+        eq = np.interp(scaled.flatten(), bins[:-1], cdf)
+        out = eq.reshape(out.shape) * (arr_max - arr_min) + arr_min
 
-    # ─── Final Clipping and Resize Check ─────────────────────────────────────
-    out = np.clip(out, 0, 255)  # Ensure values stay in [0, 255]
+    # Final Clipping and Resize Check
+    out = np.clip(out, 0, 255)
 
     if out.shape != arr.shape:
         # Resize to original dimensions if shape has changed
@@ -692,9 +680,7 @@ def apply_all_filters_to_array(self, arr):
     return out
 
 
-# ─────────────────────────────────────────────
 # Gamma in Apply Filters
-# ─────────────────────────────────────────────
 def adjust_gamma(self, val):
     """
     Adjusts the gamma correction value for the currently selected image type (hologram, amplitude, or phase),
@@ -713,9 +699,8 @@ def adjust_gamma(self, val):
             self.gamma_r = val
 
 
-# ─────────────────────────────────────────────
+
 # Contrast in Apply Filters
-# ─────────────────────────────────────────────
 def adjust_contrast(self, val):
     """
     Adjusts the contrast value for the currently selected image type,
@@ -734,9 +719,7 @@ def adjust_contrast(self, val):
             self.contrast_r = val
 
 
-# ─────────────────────────────────────────────
 # Highpass in Apply Filters
-# ─────────────────────────────────────────────
 def adjust_highpass(self, val):
     """
     Adjusts the high-pass filter cutoff value for the selected image type,
@@ -755,9 +738,7 @@ def adjust_highpass(self, val):
             self.highpass_r = val
 
 
-# ─────────────────────────────────────────────
 # Lowpass in Apply Filters
-# ─────────────────────────────────────────────
 def adjust_lowpass(self, val):
     """
     Adjusts the low-pass filter cutoff value for the selected image type,
@@ -776,9 +757,7 @@ def adjust_lowpass(self, val):
             self.lowpass_r = val
 
 
-# ─────────────────────────────────────────────
 # Adaptative in Apply Filters
-# ─────────────────────────────────────────────
 def adjust_adaptative_eq(self):
     """
     Enables adaptive histogram equalization for the selected image type,
@@ -797,9 +776,7 @@ def adjust_adaptative_eq(self):
             self.adaptative_eq_r = True
 
 
-# ─────────────────────────────────────────────
 # Default values for filters  in Apply Filters
-# ─────────────────────────────────────────────
 def default_filter_state():
     return {
         "gamma_on": False,        "gamma_val": 0.0,
@@ -813,9 +790,8 @@ def default_filter_state():
     }
 
 
-# ─────────────────────────────────────────────
+
 # Store current values in Apply Filters
-# ─────────────────────────────────────────────
 def store_current_ui_filter_state(self, dimension: int, index: int) -> None:
     """
     Stores the current state of the filter controls (checkboxes and sliders)
@@ -827,7 +803,7 @@ def store_current_ui_filter_state(self, dimension: int, index: int) -> None:
         index (int): Index of the image in the corresponding list
     """
 
-    # 1. Collect the current UI state for each filter
+    # Collect the current UI state for each filter
     st = {
         "gamma_on":     self.gamma_checkbox_var.get(),
         "gamma_val":    self.gamma_slider.get(),
@@ -840,18 +816,18 @@ def store_current_ui_filter_state(self, dimension: int, index: int) -> None:
         "adapt_eq_on":  self.adaptative_eq_checkbox_var.get(),
     }
 
-    # 2. Get the currently active speckle filter method and its parameter (if any)
-    active_method = active_speckle_method(self)  # Should return an int (0–3) or None
-    active_param  = current_speckle_param(self)  # Should return the user-defined parameter
+    # Get the currently active speckle filter method and its parameter (if any)
+    active_method = active_speckle_method(self)
+    active_param = current_speckle_param(self)
 
-    # 3. Add speckle filter settings to the state dictionary
+    # Add speckle filter settings to the state dictionary
     st.update({
         "speckle_on":    (active_method is not None),
         "speckle_meth":  active_method,
         "speckle_param": active_param,
     })
 
-    # 4. Store the state dictionary in the appropriate list based on dimension
+    # Store the state dictionary in the appropriate list based on dimension
     if dimension == 0 and index < len(self.filter_states_dim0):
         self.filter_states_dim0[index] = st
     elif dimension == 1 and index < len(self.filter_states_dim1):
@@ -860,9 +836,7 @@ def store_current_ui_filter_state(self, dimension: int, index: int) -> None:
         self.filter_states_dim2[index] = st
 
 
-# ─────────────────────────────────────────────
 # Restore filters control panel in Apply Filters
-# ─────────────────────────────────────────────
 def load_ui_from_filter_state(self, dimension: int, index: int) -> None:
     """
     Restores the filter control UI (checkboxes, sliders, and speckle settings)
@@ -882,9 +856,9 @@ def load_ui_from_filter_state(self, dimension: int, index: int) -> None:
     elif dimension == 2 and index < len(self.filter_states_dim2):
         st = self.filter_states_dim2[index]
     else:
-        return  # Invalid dimension or index
+        return
 
-    # ─── Restore basic filter checkboxes and sliders ────────────────────────
+    # Restore basic filter checkboxes and sliders
     self.gamma_checkbox_var.set(st["gamma_on"])
     self.gamma_slider.set(st["gamma_val"])
 
@@ -899,7 +873,7 @@ def load_ui_from_filter_state(self, dimension: int, index: int) -> None:
 
     self.adaptative_eq_checkbox_var.set(st["adapt_eq_on"])
 
-    # ─── Restore speckle filter method and parameter ────────────────────────
+    #  Restore speckle filter method and parameter
     # First, reset all speckle method checkboxes
     for var in self.spk_vars:
         var.set(False)
@@ -945,9 +919,7 @@ def load_ui_from_filter_state(self, dimension: int, index: int) -> None:
             pass
 
 
-# ─────────────────────────────────────────────
 # Apply matplotlib colors
-# ─────────────────────────────────────────────
 def apply_matplotlib_colormap(self, arr: np.ndarray, cmap_name: str) -> Image.Image:
     """
     Applies a matplotlib colormap to a grayscale image array.
@@ -975,9 +947,7 @@ def apply_matplotlib_colormap(self, arr: np.ndarray, cmap_name: str) -> Image.Im
     return Image.fromarray(rgba[..., :3], mode="RGB")
 
 
-# ─────────────────────────────────────────────
 # Color matplotlib
-# ─────────────────────────────────────────────
 def update_colormap_display(self):
     """
     Re-renders the currently visible amplitude or phase frame
@@ -1003,9 +973,7 @@ def update_colormap_display(self):
             self.processed_label.configure(image=tkimg)
 
 
-# ─────────────────────────────────────────────
 # Apply colormap
-# ─────────────────────────────────────────────
 def apply_colormap(self):
     """
     Applies the selected colormaps to all amplitude and phase image frames.
@@ -1030,9 +998,7 @@ def apply_colormap(self):
           f"Phase: {self.colormap_phase_var.get()}")
 
 
-# ─────────────────────────────────────────────
 # Color matplotlib
-# ─────────────────────────────────────────────
 def mpl_name(gui_name: str) -> str:
     """
     Converts a user-selected GUI colormap name into a valid Matplotlib colormap name.
@@ -1052,15 +1018,13 @@ def mpl_name(gui_name: str) -> str:
         "cividis":  "cividis",
         "hot":      "hot",
         "cool":     "cool",
-        "wistia":   "Wistia",  # Capitalized as required by Matplotlib
+        "wistia":   "Wistia",
     }
 
     return lut.get(gui_name.lower(), "original")
 
 
-# ─────────────────────────────────────────────
 # Apply measurements in Speckle frame
-# ─────────────────────────────────────────────
 def apply_speckle(app):
     """
     This function performs speckle analysis on a selected image type
@@ -1259,9 +1223,7 @@ def apply_speckle(app):
     plt.show()
 
 
-# ─────────────────────────────────────────────
 # Exclusivity for HMF and SPP filters
-# ─────────────────────────────────────────────
 def speckle_exclusive_callback(self, idx_clicked: int):
     """
     Just one filter each time.
@@ -1272,12 +1234,10 @@ def speckle_exclusive_callback(self, idx_clicked: int):
                 var.set(False)
 
 
-# ─────────────────────────────────────────────
 # Apply Speckle filters in Speckle frame
-# ─────────────────────────────────────────────
 def apply_speckle_filter(app):
     method = active_speckle_method(app)
-    dim = app.speckle_filter_dim_var.get()  # 1: Amplitude, 2: Phase
+    dim = app.speckle_filter_dim_var.get()
 
     idx = getattr(app, "current_amp_index", 0)
 
@@ -1303,6 +1263,12 @@ def apply_speckle_filter(app):
             )
             return
 
+        if hasattr(app, "original_complex_fields") and app.original_complex_fields and idx < len(
+                app.original_complex_fields):
+            base_field = app.original_complex_fields[idx]
+        else:
+            base_field = app.complex_fields[idx]
+
         field = app.complex_fields[idx]
         if not np.iscomplexobj(field):
             messagebox.showinfo(
@@ -1320,7 +1286,7 @@ def apply_speckle_filter(app):
             return
 
         # Apply SPP Filter — returns list of complex fields
-        spp_iterations = spp_filter(field, max_iterations=p)
+        spp_iterations = spp_filter(base_field, max_iterations=p)
         filtered_field = spp_iterations[-1]
 
         # Store all iterations for speckle plot
@@ -1457,9 +1423,7 @@ def apply_speckle_filter(app):
     update_cb(tkimg)
 
 
-# ─────────────────────────────────────────────
 # Hybrid Median Mean
-# ─────────────────────────────────────────────
 def HybridMedianMean(sample, max_iterations):
     """
     Applies the hybrid median-mean method to reduce speckle noise.
@@ -1483,9 +1447,7 @@ def HybridMedianMean(sample, max_iterations):
     return intermediate_results
 
 
-# ─────────────────────────────────────────────
 # Pointwise Phase Tuning
-# ─────────────────────────────────────────────
 def spp_filter(sample, max_iterations):
     """
     Applies SPP (Stochastic Phase Processing) filter to a complex-valued sample.
@@ -1497,8 +1459,9 @@ def spp_filter(sample, max_iterations):
     Returns:
     - List of intermediate complex fields (complex 2D arrays), one per iteration.
     """
-    real_part = np.real(sample)
-    imag_part = np.imag(sample)
+    real_part = np.real(sample).astype(np.float64, copy=True)
+    imag_part = np.imag(sample).astype(np.float64, copy=True)
+
 
     real_min = np.min(real_part)
     real_max = np.max(real_part)
@@ -1522,9 +1485,7 @@ def spp_filter(sample, max_iterations):
     return intermediate_results
 
 
-# ─────────────────────────────────────────────
 # Active speckle in Speckle frame
-# ─────────────────────────────────────────────
 def active_speckle_method(app):
     """
     Returns the index of the currently selected speckle filter method.
@@ -1537,9 +1498,7 @@ def active_speckle_method(app):
     return None
 
 
-# ─────────────────────────────────────────────
 # Active speckle in Speckle frame
-# ─────────────────────────────────────────────
 def current_speckle_param(app):
     """
     Returns the numeric parameter associated with the selected speckle filter.
@@ -1558,12 +1517,10 @@ def current_speckle_param(app):
         return 0
 
 
-# ─────────────────────────────────────────────
 # All speckle comparison functions
-# ─────────────────────────────────────────────
 def apply_speckle_comparison(self):
     active_options = []
-    dim = self.speckle_filter_dim_var.get()  # 1: Amplitude, 2: Phase
+    dim = self.speckle_filter_dim_var.get()
     idx = getattr(self, "current_amp_index", 0)
 
     if self.compare_side_by_side_var.get():
@@ -1594,7 +1551,7 @@ def apply_speckle_comparison(self):
 
     # Side by Side Comparison
     if "Side by Side" in active_options:
-        show_side_by_side_comparison(original, filtered, title="Speckle Filter Result")
+        show_side_by_side_comparison(self, original, filtered, title="Speckle Filter Result")
 
     # Speckle plot
     if "Speckle Plot" in active_options:
@@ -1610,6 +1567,20 @@ def apply_speckle_comparison(self):
         needs_new_selection = not hasattr(self, region_coords_attr)
 
         if needs_new_selection:
+            if hasattr(self, "_speckle_side_by_side_fig") and self._speckle_side_by_side_fig:
+                try:
+                    plt.close(self._speckle_side_by_side_fig)
+                except Exception:
+                    pass
+                self._speckle_side_by_side_fig = None
+
+            if hasattr(self, "_speckle_select_fig") and self._speckle_select_fig:
+                try:
+                    plt.close(self._speckle_select_fig)
+                except Exception:
+                    pass
+                self._speckle_select_fig = None
+
             if self.speckle_iterations_type == "spp":
                 img_for_selection = self.original_amplitude_arrays[self.current_amp_index]
             elif self.speckle_iterations_type == "hmf":
@@ -1618,7 +1589,6 @@ def apply_speckle_comparison(self):
                 print("Unknown speckle iteration type.")
                 return
 
-            print(f"Please select a region for {self.speckle_iterations_type.upper()} filter speckle analysis...")
             select_speckle_region(self, img_for_selection, callback=compare_speckle_plot_var)
             return
 
@@ -1626,10 +1596,16 @@ def apply_speckle_comparison(self):
         compare_speckle_plot_var(self)
 
 
-# ─────────────────────────────────────────────
 # Show plot original Image and filtered image
-# ─────────────────────────────────────────────
-def show_side_by_side_comparison(original: np.ndarray, filtered: np.ndarray, title: str = ""):
+def show_side_by_side_comparison(app, original: np.ndarray, filtered: np.ndarray, title: str = ""):
+    # close previous figures
+    if hasattr(app, "_speckle_side_by_side_fig") and app._speckle_side_by_side_fig:
+        try:
+            plt.close(app._speckle_side_by_side_fig)
+        except Exception:
+            pass
+        app._speckle_side_by_side_fig = None
+
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     axes[0].imshow(original, cmap='gray')
     axes[0].set_title("Original")
@@ -1646,9 +1622,7 @@ def show_side_by_side_comparison(original: np.ndarray, filtered: np.ndarray, tit
     plt.show()
 
 
-# ─────────────────────────────────────────────
 # Profile in speckle
-# ─────────────────────────────────────────────
 def show_line_profile(original, filtered):
     def onselect(eclick, erelease):
         x1, y1 = int(eclick.xdata), int(eclick.ydata)
@@ -1712,46 +1686,59 @@ def show_line_profile(original, filtered):
     plt.show(block=True)
 
 
-# ─────────────────────────────────────────────
 # Select ROI for HMF and SPP
-# ─────────────────────────────────────────────
 def select_speckle_region(app, image, callback=None):
     """
-    Allows the user to select a rectangular region from the image
-    for speckle contrast analysis over iterations. Stores coordinates in app
-    específicas para cada tipo de filtro.
+    Let the user select a rectangular ROI for speckle-contrast analysis.
+    Coordinates are stored per filter type in app.speckle_region_coords_<type>
+    and also mirrored to app.speckle_region_coords for compatibility.
     """
 
     def onselect(eclick, erelease):
+        # Guard against clicks outside axes (xdata/ydata can be None)
+        if eclick.xdata is None or eclick.ydata is None or erelease.xdata is None or erelease.ydata is None:
+            print("Selection ignored: click was outside axis.")
+            return
+
         x1, y1 = int(eclick.xdata), int(eclick.ydata)
         x2, y2 = int(erelease.xdata), int(erelease.ydata)
 
+        # Sort coordinates (left<right, top<bottom)
         x_start, x_end = sorted([x1, x2])
         y_start, y_end = sorted([y1, y2])
 
-        # Guardar coordenadas específicas para el tipo de filtro actual
+        # Enforce minimal ROI size
+        if (x_end - x_start) < 2 or (y_end - y_start) < 2:
+            print("ROI too small. Ignored.")
+            return
+
+        # Save coordinates by filter type and in a general attribute
         region_coords_attr = f"speckle_region_coords_{app.speckle_iterations_type}"
-        setattr(app, region_coords_attr, (x_start, x_end, y_start, y_end))
+        coords = (x_start, x_end, y_start, y_end)
+        setattr(app, region_coords_attr, coords)
+        app.speckle_region_coords = coords  # general mirror
 
-        # También guardar en el atributo general para compatibilidad
-        app.speckle_region_coords = (x_start, x_end, y_start, y_end)
-
-        print(
-            f"Speckle region selected for {app.speckle_iterations_type.upper()}: X({x_start}-{x_end}) Y({y_start}-{y_end})")
+        print(f"Speckle region selected for {app.speckle_iterations_type.upper()}: "
+              f"X({x_start}-{x_end}) Y({y_start}-{y_end})")
         print("Region saved. Click 'Apply' in Speckle Comparison again to generate the plot.")
 
-        plt.close()  # Close selection window
+        # Close only this selection figure
+        try:
+            if hasattr(app, "_speckle_select_fig") and app._speckle_select_fig:
+                import matplotlib.pyplot as plt
+                plt.close(app._speckle_select_fig)
+        except Exception:
+            pass
 
-        # Ejecutar callback automáticamente después de seleccionar la región
+        # Trigger callback if provided
         if callback:
             callback(app)
 
-    # Show image and activate rectangle selector
+    # Create figure and axes
     fig, ax = plt.subplots()
 
-    # Asegurar que la imagen se muestre correctamente sin saturación
-    if len(image.shape) == 2:  # Imagen 2D
-        # Usar percentiles para mejorar el contraste y evitar saturación
+    # Contrast stretch for 2D images to avoid saturation
+    if len(image.shape) == 2:
         vmin, vmax = np.percentile(image, [2, 98])
         ax.imshow(image, cmap='gray', vmin=vmin, vmax=vmax)
     else:
@@ -1761,18 +1748,49 @@ def select_speckle_region(app, image, callback=None):
     ax.set_xlabel("X coordinate")
     ax.set_ylabel("Y coordinate")
 
+    # Keep references on app to avoid GC issues and to close later
+    app._speckle_select_fig = fig
+
+    # Clean references when the window is closed
+    def _on_close(_evt):
+        if hasattr(app, "_speckle_selector"):
+            app._speckle_selector = None
+        if hasattr(app, "_speckle_select_fig"):
+            app._speckle_select_fig = None
+    fig.canvas.mpl_connect("close_event", _on_close)
+
+    # Build the rectangle selector and keep a reference
     selector = RectangleSelector(
         ax,
         onselect=onselect,
         useblit=True,
-        button=[1],
+        button=[1],        # left mouse button
         minspanx=5,
         minspany=5,
         spancoords='pixels',
         interactive=True
     )
+    app._speckle_selector = selector
 
-    plt.show()
+    # Ensure the selector is active
+    try:
+        selector.set_active(True)
+    except Exception:
+        pass
+
+    # Try to bring window to front (works on TkAgg)
+    try:
+        mngr = plt.get_current_fig_manager()
+        try:
+            mngr.window.attributes('-topmost', True)
+            mngr.window.attributes('-topmost', False)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Block to keep focus and guarantee events reach the selector
+    plt.show(block=True)
 
 
 def compare_speckle_plot_var(app):
@@ -1842,12 +1860,8 @@ def compare_speckle_plot_var(app):
     plt.tight_layout()
     plt.show()
 
-    print(f"Speckle contrast plot generated for {app.speckle_iterations_type.upper()} filter.")
 
-
-# ─────────────────────────────────────────────
 # Quantify speckle contrast
-# ─────────────────────────────────────────────
 def calc_speckle_contrast(region):
     intensity_img = np.abs(region) ** 2
     mean_i = np.mean(intensity_img)
@@ -1911,10 +1925,10 @@ def _micron_axes(ax, width_px, height_px, μm_per_px):
 def _wire_scalebar_interaction(
         fig,
         ax,
-        bar_line,             
-        bar_text,             
+        bar_line,
+        bar_text,
         microns_per_pixel,
-        busy_flag,           
+        busy_flag,
         ):
 
         MARGIN = 15
@@ -2016,7 +2030,7 @@ def _wire_scalebar_interaction(
 def _show_popup_image(parent,arr: np.ndarray, title: str = "Speckle filtered"):
      win = tk.Toplevel(parent)
      win.title(title)
-     im  = Image.fromarray(arr)
+     im = Image.fromarray(arr)
      tk_img = ImageTk.PhotoImage(im)
      lbl = tk.Label(win, image=tk_img)
      lbl.image = tk_img
@@ -2045,7 +2059,7 @@ def _refresh_zoom_view(self, refresh_ms: int = 100) -> None:
     win_h = max(self._zoom_canvas.winfo_height(), 1)
     pil = Image.fromarray(arr_view).resize((win_w, win_h),
                                              Image.Resampling.NEAREST)
-    tkim  = ImageTk.PhotoImage(pil)
+    tkim = ImageTk.PhotoImage(pil)
 
     if self._zoom_img_id is None:
         self._zoom_img_id = self._zoom_canvas.create_image(0, 0, anchor="nw",
