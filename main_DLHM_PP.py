@@ -17,7 +17,7 @@ import functions_GUI as fGUI
 
 class App(ctk.CTk):
 
-    DOWNSAMPLE_FACTOR = 4
+    DOWNSAMPLE_FACTOR = 1
 
     class _DummyEntry:
         #removed “LateralMagnification” entry.
@@ -45,7 +45,7 @@ class App(ctk.CTk):
         super().__init__()
         if not hasattr(tGUI, "ImageTk"):
             tGUI.ImageTk = ImageTk   
-        self.title('DLHM GUI')
+        self.title('HoloBio: DLHM – Offline')
         self.attributes('-fullscreen', False)
         self.state('normal')
 
@@ -826,15 +826,25 @@ class App(ctk.CTk):
         btn.bind("<Button-1>", _on_click)
 
     def _set_unit_in_label(self, lbl: ctk.CTkLabel, unit: str) -> None:
-        base = lbl.cget("text").split("(")[0].strip()
+        raw_text = lbl.cget("text")
+        base = raw_text.split("(")[0].strip()  # drop previous "(unit)" if present
         lbl.configure(text=f"{base} ({unit})")
+        # Identify which family this label belongs to and propagate instantly
         if "Wavelength" in base:
             self.wavelength_unit = unit
-        elif "Pixel pitch" in base:
-            self.pitch_unit = unit
-        elif "Distance" in base or base.endswith("(L)") \
-             or base.endswith("(Z)") or base.endswith("(r)"):
+        elif "Pitch X" in base:
+            self.pitch_x_unit = unit
+        elif "Pitch Y" in base:
+            self.pitch_y_unit = unit
+        # Any of these labels is part of the *distance* cluster
+        elif "Distance" in base or "Distances" in base or base in {"L", "Z", "r"}:
+            # Keep both the plain attribute and the StringVar in sync
             self.distance_unit = unit
+            # Ensure the StringVar exists before setting it
+            if hasattr(self, "_dist_unit_var") and isinstance(self._dist_unit_var, tk.StringVar):
+                self._dist_unit_var.set(unit)
+            # Redraw every caption/placeholder *now* (L/Z/r sliders + Limits frame)
+            self._refresh_distance_unit_labels()
 
     def get_value_in_micrometers(self, value: str, unit: str) -> float:
         """Converts *value* (given in *unit*) into micrometres (µm)."""
@@ -1325,20 +1335,24 @@ class App(ctk.CTk):
                                                    command=self.restore_limits)
         self.restore_limits_button.grid(row=2, column=4, sticky="ew", padx=10)
 
-
+        # ============ Compensation Controls (INLINE) ============
+        self.compensate_frame = ctk.CTkFrame(self.parameters_inner_frame,
+                                          width=PARAMETER_FRAME_WIDTH, height=50)
+        self.compensate_frame.grid(row=first_row+5, column=0, sticky="ew", pady=(8, 8))
+        self.compensate_frame.grid_propagate(False)
+        for c in (0, 2):
+         self.compensate_frame.columnconfigure(c, weight=1)
+ 
         self.compensate_button = ctk.CTkButton(
-            self.parameters_inner_frame,
-            text="Compensate",
-            command=self._on_compensate,
-            width=PARAMETER_BUTTON_WIDTH
-        )
-        # one row below the limits‑frame
-        self.compensate_button.grid(row=first_row + 5, column=0,pady=(18, 8),sticky="ew")
+         self.compensate_frame, text="Reconstruction", width=120,
+         command=self._on_compensate)
+        self.compensate_button.grid(row=0, column=1, sticky="ew",
+                                 padx=3, pady=(10,10))
+        #self.compensate_button.grid(row=first_row + 5, column=0,pady=(18, 8),sticky="ew")
     
     def _subtract_reference(self, holo_u8: np.ndarray) -> np.ndarray:
         """
         Return *holo_u8* (uint8) with the selected reference removed.
-
         • Works in float32 so it accepts 8-bit or 16-bit inputs.  
         • Fits a multiplicative gain on the non-zero area of the reference
           (black side-bars are ignored).  
@@ -1387,28 +1401,26 @@ class App(ctk.CTk):
         self.set_variables()
         self.set_value_L(); self.set_value_Z(); self.set_value_r()
 
-        if self.wavelength <= 0 or self.dxy <= 0:
-            from tkinter import messagebox
-            messagebox.showerror(
-                "Missing parameters",
-                "Please enter valid (non-zero) values for\n"
-                "Wavelength and Pixel pitch before\npressing *Compensate*.")
+        # Block reconstruction if parameters are missing
+        if not self._params_are_valid():
+            self._warn_missing_parameters()
+            self.need_recon = True
             return
 
-        # 1 ▏reference subtraction
+        # 1) reference subtraction
         holo_u8 = self._subtract_reference(self.arr_c_orig.copy())
 
-        # 2 ▏down-sample *once*, get the effective pitch
+        # 2) down-sample once & get effective pitch
         holo_u8, self._dxy_eff = self._downsample_hologram(holo_u8)
 
-        # 3 ▏refresh left panel immediately
+        # 3) refresh left panel immediately
         self.arr_c = holo_u8
 
-        # 4 ▏build a fresh input packet
-        self.update_inputs("reconstruction")          # uses self._dxy_eff
-        self.recon_input.update({"image": holo_u8})   # swap in new frame
+        # 4) build a fresh input packet
+        self.update_inputs("reconstruction")
+        self.recon_input.update({"image": holo_u8})
 
-        # 5 ▏fire the worker and wait for the answer (≤ 3 s timeout)
+        # 5) fire the worker and wait for the answer (≤ 3 s timeout)
         if not self.queue_manager["reconstruction"]["input"].full():
             self.queue_manager["reconstruction"]["input"].put(self.recon_input)
 
@@ -1420,7 +1432,7 @@ class App(ctk.CTk):
 
         self.recon_output = out
         self._update_recon_arrays()
-        self.update_right_view()
+        self.update_right_view() 
         self.need_recon = False
  
     def _distance_unit_update(self, _lbl, unit: str) -> None:
@@ -1509,12 +1521,6 @@ class App(ctk.CTk):
                              int_arr:   np.ndarray | None = None,
                              phase_arr: np.ndarray | None = None):
         """
-        Refresh internal buffers and thumbnails.
-
-        **New behaviour:**  
-        If a reference has been used, the *amplitude* is normalised to the
-        full 0-255 range for display.  Phase is *never* normalised.
-        """
         # 1 ▏fetch result from the worker  (unchanged)
         if amp_arr is None or phase_arr is None:
             if not hasattr(self, "recon_output"):
@@ -1572,6 +1578,57 @@ class App(ctk.CTk):
             self.phase_arrays[0], self._active_cmap_phase)
 
         self._apply_live_speckle_if_active()
+        """
+        # 1) Fetch result from the worker if not provided
+        if amp_arr is None or phase_arr is None:
+            if not hasattr(self, "recon_output"):
+                return
+            amp_arr   = self.recon_output.get("amp")
+            phase_arr = self.recon_output.get("phase")
+            int_arr   = self.recon_output.get("int")
+            field     = self.recon_output.get("field")
+        else:
+            field = None
+
+        if amp_arr is None or phase_arr is None:
+            return
+
+        # 2) Store pristine copies — NO amplitude normalisation here
+        self.original_amplitude_arrays = [amp_arr.copy()]
+        self.original_phase_arrays     = [phase_arr.copy()]
+        self.amplitude_arrays          = [amp_arr.copy()]
+        self.phase_arrays              = [phase_arr.copy()]
+
+        if int_arr is not None:
+            self.original_intensity_arrays = [int_arr.copy()]
+            self.intensity_arrays          = [int_arr.copy()]
+
+        # 3) Complex field rebuild (unchanged)
+        if field is None:
+            amp_f   = self.amplitude_arrays[0].astype(np.float32) / 255.0
+            phase_r = self.phase_arrays[0].astype(np.float32) / 255.0 * 2 * np.pi
+            field   = amp_f * np.exp(1j * phase_r)
+        self.complex_fields = [field]
+
+        # 4) Re-apply saved filters / colour-maps (original logic)
+        self._ensure_filter_state_lists_length()
+        st_amp   = self.filter_states_dim1[0]
+        st_phase = self.filter_states_dim2[0]
+
+        if self._filters_enabled(st_amp):
+            self.amplitude_arrays[0] = self._apply_filters_from_state(
+                self.amplitude_arrays[0], st_amp)
+        if self._filters_enabled(st_phase):
+            self.phase_arrays[0] = self._apply_filters_from_state(
+                self.phase_arrays[0], st_phase)
+
+        self.amplitude_arrays[0] = self._apply_ui_colormap(
+            self.amplitude_arrays[0], self._active_cmap_amp)
+        self.phase_arrays[0] = self._apply_ui_colormap(
+            self.phase_arrays[0], self._active_cmap_phase)
+
+        # 5) If live speckle is toggled, refresh with filtered buffers
+        self._apply_live_speckle_if_active()
 
     def _remove_legacy_show_checkboxes(self):
         """Hide the old ‘Show Intensity’ and ‘Show Phase’ tick-boxes."""
@@ -1610,8 +1667,9 @@ class App(ctk.CTk):
     def _on_distance_unit_change(self, new_unit: str) -> None:
         """Triggered by the ▼ in ‘Distances’. Refresh everything."""
         self.distance_unit = new_unit
-        self._dist_unit_var.set(new_unit)      # keep StringVar in-sync
-        self._refresh_distance_unit_labels()   # redraw captions
+        if hasattr(self, "_dist_unit_var") and isinstance(self._dist_unit_var, tk.StringVar):
+            self._dist_unit_var.set(new_unit)
+        self._refresh_distance_unit_labels()
 
 
     def _refresh_distance_unit_labels(self) -> None:
@@ -1621,47 +1679,54 @@ class App(ctk.CTk):
         in micrometres (µm).
         """
         u      = self.distance_unit
-        factor = self._unit_factor(u)          # µm per <u>
+        factor = self._unit_factor(u)  # µm per <u>
 
         # Header & column titles
-        self.dist_label.configure(text=f"Distances ({u})")
-        self.limit_L_label.configure(text=f"L ({u})")
-        self.limit_Z_label.configure(text=f"Z ({u})")
-        self.limit_R_label.configure(text=f"r ({u})")
+        if hasattr(self, "dist_label"):
+            self.dist_label.configure(text=f"Distances ({u})")
+        if hasattr(self, "limit_L_label"):
+            self.limit_L_label.configure(text=f"L ({u})")
+        if hasattr(self, "limit_Z_label"):
+            self.limit_Z_label.configure(text=f"Z ({u})")
+        if hasattr(self, "limit_R_label"):
+            self.limit_R_label.configure(text=f"r ({u})")
 
-        # Slider captions
-        self.L_slider_title.configure(
-            text=f"Distance between camera and source L ({u}): "
-                 f"{round(self.L / factor, 4)}")
-        self.Z_slider_title.configure(
-            text=f"Distance between sample and source Z ({u}): "
-                 f"{round(self.Z / factor, 4)}")
-        self.r_slider_title.configure(
-            text=f"Reconstruction distance r ({u}): "
-                 f"{round(self.r / factor, 4)}")
+        # Slider captions (preserve displayed numbers converted to the new unit)
+        if hasattr(self, "L_slider_title"):
+            self.L_slider_title.configure(
+                text=f"Distance between camera and source L ({u}): "
+                     f"{round(self.L / factor, 4)}")
+        if hasattr(self, "Z_slider_title"):
+            self.Z_slider_title.configure(
+                text=f"Distance between sample and source Z ({u}): "
+                     f"{round(self.Z / factor, 4)}")
+        if hasattr(self, "r_slider_title"):
+            self.r_slider_title.configure(
+                text=f"Reconstruction distance r ({u}): "
+                     f"{round(self.r / factor, 4)}")
 
         # Slider-entry placeholders
-        self.L_slider_entry.configure(
-            placeholder_text=f"{round(self.L / factor, 4)}")
-        self.Z_slider_entry.configure(
-            placeholder_text=f"{round(self.Z / factor, 4)}")
-        self.r_slider_entry.configure(
-            placeholder_text=f"{round(self.r / factor, 4)}")
+        if hasattr(self, "L_slider_entry"):
+            self.L_slider_entry.configure(placeholder_text=f"{round(self.L / factor, 4)}")
+        if hasattr(self, "Z_slider_entry"):
+            self.Z_slider_entry.configure(placeholder_text=f"{round(self.Z / factor, 4)}")
+        if hasattr(self, "r_slider_entry"):
+            self.r_slider_entry.configure(placeholder_text=f"{round(self.r / factor, 4)}")
 
         # Limits-frame placeholders
-        self.limit_min_L_entry.configure(
-            placeholder_text=f"{round(self.MIN_L / factor, 4)}")
-        self.limit_max_L_entry.configure(
-            placeholder_text=f"{round(self.MAX_L / factor, 4)}")
-        self.limit_min_Z_entry.configure(
-            placeholder_text=f"{round(self.MIN_Z / factor, 4)}")
-        self.limit_max_Z_entry.configure(
-            placeholder_text=f"{round(self.MAX_Z / factor, 4)}")
-        self.limit_min_R_entry.configure(
-            placeholder_text=f"{round(self.MIN_R / factor, 4)}")
-        self.limit_max_R_entry.configure(
-            placeholder_text=f"{round(self.MAX_R / factor, 4)}")
-
+        if hasattr(self, "limit_min_L_entry"):
+            self.limit_min_L_entry.configure(placeholder_text=f"{round(self.MIN_L / factor, 4)}")
+        if hasattr(self, "limit_max_L_entry"):
+            self.limit_max_L_entry.configure(placeholder_text=f"{round(self.MAX_L / factor, 4)}")
+        if hasattr(self, "limit_min_Z_entry"):
+            self.limit_min_Z_entry.configure(placeholder_text=f"{round(self.MIN_Z / factor, 4)}")
+        if hasattr(self, "limit_max_Z_entry"):
+            self.limit_max_Z_entry.configure(placeholder_text=f"{round(self.MAX_Z / factor, 4)}")
+        if hasattr(self, "limit_min_R_entry"):
+            self.limit_min_R_entry.configure(placeholder_text=f"{round(self.MIN_R / factor, 4)}")
+        if hasattr(self, "limit_max_R_entry"):
+            self.limit_max_R_entry.configure(placeholder_text=f"{round(self.MAX_R / factor, 4)}")
+ 
     def _run_filters_pipeline(self, img: np.ndarray,
                               use_left_side: bool) -> np.ndarray:
         if use_left_side:
@@ -2006,17 +2071,8 @@ class App(ctk.CTk):
         self.settings = False
 
     def _update_unit_in_label(self, lbl: ctk.CTkLabel, unit: str) -> None:
-        base = lbl.cget("text").split("(")[0].strip()
-        lbl.configure(text=f"{base} ({unit})")
-
-        if "Wavelength" in base:
-            self.wavelength_unit = unit
-        elif "Pitch X" in base:
-            self.pitch_x_unit = unit
-        elif "Pitch Y" in base:
-            self.pitch_y_unit = unit
-        else:  # all distances share the same selector
-            self.distance_unit = unit
+        self._set_unit_in_label(lbl, unit)
+        
     
     def _ensure_reconstruction_worker(self) -> None:
      """
@@ -2215,13 +2271,16 @@ class App(ctk.CTk):
     def _schedule_reconstruction(self, delay_ms: int = 75) -> None:
         """Postpone reconstruction so it runs only after the user stops
         dragging the slider for *delay_ms* milliseconds."""
+        if not self._reconstruction_allowed():
+            return
         if hasattr(self, "_recon_after"):
             self.after_cancel(self._recon_after)
         self._recon_after = self.after(delay_ms, self._dispatch_reconstruction)
 
     def _dispatch_reconstruction(self) -> None:
-        """Send one job to the worker – replaces the immediate call that
-        used to happen inside each slider callback."""
+        """Send one job to the worker – only when allowed."""
+        if not self._reconstruction_allowed():
+            return
         self.update_inputs("reconstruction")
         if not self.queue_manager["reconstruction"]["input"].full():
             self.queue_manager["reconstruction"]["input"].put(self.recon_input)
@@ -2436,14 +2495,55 @@ class App(ctk.CTk):
          frame = getattr(self, frame_attr, None)
          if frame is not None:
              frame.configure(fg_color=color)
-   
+    
+    def _params_are_valid(self) -> bool:
+        """
+        True only if the user has provided BOTH wavelength and pixel pitch.
+        """
+        w = float(getattr(self, "wavelength", 0) or 0)
+        d = float(getattr(self, "dxy", 0) or 0)
+        return (w > 0.0) and (d > 0.0)
+
+    def _reconstruction_allowed(self) -> bool:
+        """
+        We only auto-reconstruct when:
+          • user has pressed 'Reconstruction' at least once (need_recon == False)
+          • parameters are valid (wavelength & pixel size > 0)
+          • there is at least one hologram loaded
+        """
+        if getattr(self, "need_recon", True):
+            return False
+        if not self._params_are_valid():
+            return False
+        if not getattr(self, "multi_holo_arrays", []):
+            return False
+        return True
+
+    def _warn_missing_parameters(self) -> None:
+        """
+        DHM–offline style warning shown when trying to reconstruct without
+        wavelength & pixel size.
+        """
+        from tkinter import messagebox
+        messagebox.showwarning(
+            "Warning",
+            "Reconstruction parameters (wavelength and pixel size) cannot be zero.\n"
+            "Please verify them before proceeding."
+        )
+
     def after_idle_setup(self):
         self._hide_parameters_nav_button()
         self._convert_dist_selector()
         self._sync_canvas_and_frame_bg()
         self._remove_legacy_show_checkboxes()
-        self._customize_bio_analysis() 
+        self._customize_bio_analysis()
         self.algorithm_var.trace_add("write", self._require_new_compensation)
+
+        # Enforce safety at startup: no default λ / dxy and require Compensate
+        self.wavelength = 0.0
+        self.dxy = 0.0
+        self.need_recon = True
+        self._show_waiting_for_compensate()
 
     def _customize_bio_analysis(self) -> None:
         """
@@ -2607,14 +2707,14 @@ class App(ctk.CTk):
         """Main refresh loop (≈ 20 fps)."""
         start = time.time()
 
-        # 1) New reconstructions
+        # 1) New reconstructions from the worker
         if not self.queue_manager["reconstruction"]["output"].empty():
             out = self.queue_manager["reconstruction"]["output"].get()
             self.recon_output = out
             self._update_recon_arrays()
             self.update_right_view()
 
-        # 2) (no change) – build filter lists to send to the worker
+        # 2) Build filter lists to send to the worker (unchanged)
         self.filters_c, self.filter_params_c = [], []
         if self.arr_c.size:
             if self.manual_contrast_c_var.get():
@@ -2640,9 +2740,9 @@ class App(ctk.CTk):
         if self.manual_lowpass_r_var.get():
             self.filters_r += ["lowpass"];   self.filter_params_r += [self.lowpass_r]
 
-        # 3) send work to the reconstruction process
+        # 3) Only push work to reconstruction when it's allowed
         self.update_inputs("reconstruction")
-        if not getattr(self, "need_recon", False):
+        if self._reconstruction_allowed():
             if not self.queue_manager["reconstruction"]["input"].full():
                 self.queue_manager["reconstruction"]["input"].put(self.recon_input)
 
