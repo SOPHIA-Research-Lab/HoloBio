@@ -13,7 +13,11 @@ def track_particles_kalman(
     kalman_q=0.01,
     kalman_r=1.0,
     filter_method="gaussian",
-    enable_color_filter=True
+    enable_color_filter=True,
+    use_world_coords=False, 
+    magnification=1.0, 
+    pitch_x=1.0, 
+    pitch_y=1.0
 ):
     class KalmanFilter2D:
         def __init__(self, x, y):
@@ -193,10 +197,22 @@ def track_particles_kalman(
             })
 
     df_full = pd.DataFrame(all_positions)
-    df_full['xy'] = list(zip(df_full['x'], df_full['y']))
-    df_pivot = df_full.pivot(index='frame', columns='particle_id', values='xy')
-    df_pivot = df_pivot.applymap(lambda xy: (round(xy[0], 2), round(xy[1], 2)) if pd.notnull(xy) else None)
-    df_pivot.columns = [f"Particle_{int(col)} (x, y)" for col in df_pivot.columns]
-    df_positions_vector = df_pivot.reset_index()
+    df_full["x"] = df_full["x"].round(2)
+    df_full["y"] = df_full["y"].round(2)
+    df_pivot = df_full.pivot(index="frame", columns="particle_id", values=["x", "y"])
+    df_pivot = df_pivot.swaplevel(axis=1).sort_index(axis=1, level=0)
+    df_pivot.columns = [f"Particle {pid}_{coord}" for pid, coord in df_pivot.columns]
+    df_positions_vector = df_pivot.reset_index().rename(columns={"frame": "frames"})
+
+    if use_world_coords:
+        
+        pixel_size_x_um = pitch_x / magnification
+        pixel_size_y_um = pitch_y / magnification
+
+        for col in df_positions_vector.columns:
+            if col.endswith("_x"):
+                df_positions_vector[col] *= pixel_size_x_um
+            elif col.endswith("_y"):
+                df_positions_vector[col] *= pixel_size_y_um
 
     return trajectories, detected_positions, df_full, df_positions_vector

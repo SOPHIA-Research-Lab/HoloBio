@@ -9,6 +9,8 @@ from importlib import import_module, reload
 import functions_GUI as fGUI
 import threading, queue
 from pandastable.core import Table
+import pandas as pd
+import re
 from track_particles_kalman import track_particles_kalman as track
 
 
@@ -2052,7 +2054,7 @@ class App(ctk.CTk):
         self.particle_tracking_frame = ctk.CTkFrame(
             self.phase_compensation_inner_frame,
             width=PARAMETER_FRAME_WIDTH,
-            height=200
+            height=400
         )
         self.particle_tracking_frame.grid(row=5, column=0, sticky="ew", pady=(2, 6))
         self.particle_tracking_frame.grid_propagate(False)
@@ -2110,7 +2112,7 @@ class App(ctk.CTk):
 
         # Kalman filter parameters
         self.kalman_frame = ctk.CTkFrame(self.particle_tracking_frame, fg_color="transparent")
-        self.kalman_frame.grid(row=6, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+        self.kalman_frame.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky="w")
 
         ctk.CTkLabel(self.kalman_frame, text="Kalman P:").pack(side="left", padx=(0, 3))
         self.kalman_p_entry = ctk.CTkEntry(self.kalman_frame, width=50)
@@ -2126,6 +2128,25 @@ class App(ctk.CTk):
         self.kalman_r_entry = ctk.CTkEntry(self.kalman_frame, width=50)
         self.kalman_r_entry.insert(0, "1")
         self.kalman_r_entry.pack(side="left", padx=(0, 5))
+
+        #World coordinates label
+        self.coord_frame = ctk.CTkFrame(self.particle_tracking_frame, fg_color="transparent")
+        self.coord_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+
+        self.world_coordinates = tk.BooleanVar(value=True)
+        self.world_coordinates_checkbox = ctk.CTkCheckBox(
+            self.coord_frame,
+            text="World Coordinates",
+            variable=self.world_coordinates,
+            onvalue=True,
+            offvalue=False
+        )
+        self.world_coordinates_checkbox.pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(self.coord_frame, text="Magnification (M):").pack(side="left", padx=(0, 3))
+        self.magnification = ctk.CTkEntry(self.coord_frame, width=50)
+        self.magnification.insert(0, "40")
+        self.magnification.pack(side="left", padx=(0, 10))
 
         # Tracking button
         self.tracking_button = ctk.CTkButton(
@@ -2160,6 +2181,10 @@ class App(ctk.CTk):
             kalman_p = float(self.kalman_p_entry.get())
             kalman_q = float(self.kalman_q_entry.get())
             kalman_r = float(self.kalman_r_entry.get())
+            use_world_coords = self.world_coordinates.get()
+            magnification = float(self.magnification.get())
+            pitch_x = float(self.pitchx_label_pc_entry.get())  
+            pitch_y = float(self.pitchy_label_pc_entry.get())
 
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
@@ -2173,10 +2198,14 @@ class App(ctk.CTk):
                 kalman_q=kalman_q,
                 kalman_r=kalman_r,
                 filter_method=filter_method,
-                enable_color_filter=use_color_filter
+                enable_color_filter=use_color_filter,
+                use_world_coords=use_world_coords,
+                magnification=magnification,
+                pitch_x=pitch_x,
+                pitch_y=pitch_y
             )
 
-            self.df_positions_vector = df_positions_vector
+            self.df_positions_vector = df_positions_vector  
             self.show_dataframe_in_table(self.df_positions_vector, title="Positions vector")
 
             print("Tracking completed. Total trajectories:", len(trajectories))
@@ -2187,6 +2216,27 @@ class App(ctk.CTk):
             traceback.print_exc()
 
     def show_dataframe_in_table(self, df, title="Coordinates"):
+        df = df.copy()
+        if df.columns[0].lower().startswith("frame"):
+            df.rename(columns={df.columns[0]: "frame"}, inplace=True)
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = ["frame"] + [f"Particle {pid}_{coord}" 
+                                    for coord, pid in df.columns[1:]]
+        else:
+            new_cols = []
+            for col in df.columns:
+                if col != "frame":
+                    match = re.match(r".*?(\d+).*?([xy])", col, re.IGNORECASE)
+                    if match:
+                        pid, coord = match.groups()
+                        new_cols.append(f"Particle {pid}_{coord}")
+                    else:
+                        new_cols.append(col)
+                else:
+                    new_cols.append(col)
+            df.columns = new_cols
+
         table_win = tk.Toplevel(self)
         table_win.title(title)
         table_win.geometry("800x400")
