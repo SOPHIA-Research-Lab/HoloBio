@@ -2183,8 +2183,19 @@ class App(ctk.CTk):
             kalman_r = float(self.kalman_r_entry.get())
             use_world_coords = self.world_coordinates.get()
             magnification = float(self.magnification.get())
-            pitch_x = float(self.pitchx_label_pc_entry.get())  
-            pitch_y = float(self.pitchy_label_pc_entry.get())
+            pitch_x_str = self.pitchx_label_pc_entry.get().strip()
+            pitch_y_str = self.pitchy_label_pc_entry.get().strip()
+
+            if use_world_coords:
+                if not pitch_x_str or not pitch_y_str:
+                    tk.messagebox.showwarning(
+                        "Missing Pitch Values",
+                        "Please enter both Pitch X and Pitch Y values before running tracking."
+                    )
+                    return
+
+            pitch_x = float(pitch_x_str) if pitch_x_str else 1.0
+            pitch_y = float(pitch_y_str) if pitch_y_str else 1.0
 
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
