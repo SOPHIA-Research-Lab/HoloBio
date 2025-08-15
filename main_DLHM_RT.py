@@ -102,8 +102,8 @@ class App(ctk.CTk):
         self.arr_c = np.zeros((400, 300), dtype=np.uint8)
         self.arr_r = np.zeros((400, 300), dtype=np.uint8)
 
-        self.viewbox_width = 400
-        self.viewbox_height = 300
+        self.viewbox_width = 600
+        self.viewbox_height = 500
 
         # Convert them to PIL + CTkImage
         im_c = Image.fromarray(self.arr_c)
@@ -772,10 +772,19 @@ class App(ctk.CTk):
 
     def _compute_ft(self, arr: np.ndarray) -> np.ndarray:
         """Returns log-magnitude FT (uint8) of *arr*."""
-        f  = np.fft.fftshift(np.fft.fft2(arr.astype(np.float32)))
-        mag = np.log1p(np.abs(f))
-        mag = (mag / mag.max() * 255).astype(np.uint8)
-        return mag
+        if arr is None or arr.size == 0:
+            return np.zeros((1, 1), dtype=np.uint8)
+        f = np.fft.fftshift(np.fft.fft2(arr.astype(np.float32)))
+        mag = np.abs(f)
+        use_log = True
+        try:
+            use_log = str(self.ft_mode_var.get()).startswith("With")
+        except Exception:
+            pass
+        if use_log:
+            mag = np.log1p(mag)
+        mag = mag / (mag.max() + 1e-12)
+        return (mag * 255.0).astype(np.uint8)
 
     def update_left_view(self):
         """
@@ -786,20 +795,39 @@ class App(ctk.CTk):
 
         if view_choice == "Hologram":
             disp_arr = self.arr_c_view
-            title    = "Hologram"
+            title = "Hologram"
         else:
-            if self.ft_arrays:
-                disp_arr = self.ft_arrays[self.current_ft_index]
+            # Decide log vs linear from the UI
+            log_mode = True
+            try:
+                log_mode = str(self.ft_mode_var.get()).startswith("With")
+            except Exception:
+                pass
+
+            # Prefer the latest preview frame if available
+            src = None
+            if getattr(self, "preview_active", False) and hasattr(self, "last_preview_gray"):
+                src = self.last_preview_gray
+            elif hasattr(self, "arr_c_view"):
+                src = self.arr_c_view
+
+            if src is None or src.size == 0:
+                disp_arr = np.zeros((1, 1), dtype=np.uint8)
             else:
-                disp_arr = self._generate_ft_display(self.arr_c_view, log_scale=True)
-            title = "Fourier Transform"
+                disp_arr = self._generate_ft_display(src, log_scale=log_mode)
+
+            # Keep small caches in sync so zoom & helpers use the correct mode
             self._last_ft_display = disp_arr.copy()
+            self.ft_arrays = [disp_arr]
+            self.current_ft_index = 0
+
+            title = f"Fourier Transform ({'log' if log_mode else 'linear'})"
 
         pil = Image.fromarray(disp_arr)
         self.img_c = self._fit_left_image(pil)
         self.captured_label.configure(image=self.img_c)
         self.captured_label.image = self.img_c
-        self.captured_title_label.configure(text=title)    
+        self.captured_title_label.configure(text=title)
 
     def _get_current_array(self, what: str) -> np.ndarray | None:
         """
@@ -871,7 +899,31 @@ class App(ctk.CTk):
         self.processed_title_label.configure(text=view_name)
 
     def _on_ft_mode_changed(self):
-     self._refresh_all_ft_views()
+
+        # Drop any cached FT so future requests rebuild with the new mode
+        if hasattr(self, "_last_ft_display"):
+            try:
+                delattr(self, "_last_ft_display")
+            except Exception:
+                pass
+
+        # If we have a current source, precompute the FT cache now
+        src = None
+        if getattr(self, "preview_active", False) and hasattr(self, "last_preview_gray"):
+            src = self.last_preview_gray
+        elif hasattr(self, "arr_c_view"):
+            src = self.arr_c_view
+
+        if src is not None and src.size:
+            use_log = str(self.ft_mode_var.get()).startswith("With")
+            ft_now = self._generate_ft_display(src, log_scale=use_log)
+            self.ft_arrays = [ft_now]
+            self.ft_frames = [self._fit_left_image(Image.fromarray(ft_now))]
+            self.current_ft_index = 0
+            self._last_ft_display = ft_now.copy()
+
+        # Redraw if the FT is currently visible
+        self._refresh_all_ft_views()
 
     def _show_amp_mode_menu(self):
      menu = tk.Menu(self, tearoff=0)
@@ -960,9 +1012,13 @@ class App(ctk.CTk):
         self.ft_coord_label.place_forget()
 
     def _refresh_all_ft_views(self):
-     """Re-dibuja las vistas que estén mostrando la FT con el modo elegido."""
-     if self.holo_view_var.get() == "Fourier Transform":
-         self.update_left_view()
+        if hasattr(self, "_last_ft_display"):
+            try:
+                delattr(self, "_last_ft_display")
+            except Exception:
+                pass
+        if self.holo_view_var.get() == "Fourier Transform":
+            self.update_left_view()
 
     def _hide_parameters_nav_button(self) -> None:
         if hasattr(self, "param_button"):

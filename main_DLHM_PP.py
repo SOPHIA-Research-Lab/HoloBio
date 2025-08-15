@@ -17,7 +17,7 @@ import functions_GUI as fGUI
 
 class App(ctk.CTk):
 
-    DOWNSAMPLE_FACTOR = 1
+    DOWNSAMPLE_FACTOR = 4
 
     class _DummyEntry:
         #removed “LateralMagnification” entry.
@@ -116,8 +116,8 @@ class App(ctk.CTk):
         self.arr_c = np.zeros((400, 300), dtype=np.uint8)
         self.arr_r = np.zeros((400, 300), dtype=np.uint8)
 
-        self.viewbox_width = 400
-        self.viewbox_height = 300
+        self.viewbox_width = 600
+        self.viewbox_height = 500
 
         # Convert them to PIL + CTkImage
         im_c = Image.fromarray(self.arr_c)
@@ -218,9 +218,7 @@ class App(ctk.CTk):
             self.capture_input['filter']          = True
 
         if process in ('reconstruction', ''):
-            # use the pitch that matches the *current* hologram resolution
             effective_dxy = getattr(self, '_dxy_eff', self.dxy)
-
             self.recon_input = {
                 "image":        self.arr_c,
                 "filters":      (self.filters_r, self.filter_params_r),
@@ -230,10 +228,13 @@ class App(ctk.CTk):
                 "Z":            self.Z,
                 "r":            self.r,
                 "wavelength":   self.wavelength,
-                "dxy":          effective_dxy,     # <- fixed
+                "dxy":          effective_dxy,
                 "scale_factor": self.scale_factor,
                 "squared":      self.square_field.get(),
-                "phase":        self.Processed_Image_r.get()
+                "phase":        self.Processed_Image_r.get(),
+                #
+                "cosine_period": getattr(self, "cosine_period", 100),
+                "match_reference_display": self.algorithm_var.get() == "KR",
             }
 
     def update_outputs(self, process: str = ""):
@@ -555,6 +556,8 @@ class App(ctk.CTk):
         • `fGUI.build_toolbar()` drops the top toolbar inside `viewing_frame`.
         • `fGUI.build_two_views_panel()` puts the twin image viewers below.
         """
+        self.viewbox_width = 600
+        self.viewbox_height = 500
         # LEFT strip  (Parameters + scrollbar)
         self.init_navigation_frame()
         self.holo_views  = [("init", self.img_c)]
@@ -606,46 +609,69 @@ class App(ctk.CTk):
         ctk.set_appearance_mode(mode)
         self._sync_canvas_and_frame_bg()
 
+    def _is_log_scale_selected(self) -> bool:
+        """
+        Returns True only when the FT menu is on 'With logarithmic scale'.
+        Robust to minor wording variants; crucially, it does NOT match 'Without...'.
+        """
+        v = (self.ft_mode_var.get() or "").strip().lower()
+        return v in {
+            "with logarithmic scale",
+            "with log scale",
+            "log",
+            "logarithmic",
+        }
+
+     
     def _compute_ft(self, arr: np.ndarray) -> np.ndarray:
-        """Returns log-magnitude FT (uint8) of *arr*."""
-        f  = np.fft.fftshift(np.fft.fft2(arr.astype(np.float32)))
-        mag = np.log1p(np.abs(f))
-        mag = (mag / mag.max() * 255).astype(np.uint8)
-        return mag
+        """Returns magnitude FT (uint8) of *arr*, log-compressed if selected."""
+        if arr is None or arr.size == 0:
+            return np.zeros((1, 1), dtype=np.uint8)
+
+        f = np.fft.fftshift(np.fft.fft2(arr.astype(np.float32)))
+        mag = np.abs(f)
+
+        if self._is_log_scale_selected():
+            mag = np.log1p(mag)
+
+        mag = mag / (mag.max() + 1e-12)
+        return (mag * 255.0).astype(np.uint8)
+
 
     def update_left_view(self):
         """
         Show either the hologram or its Fourier Transform.
-        • honours the log-scale toggle
-        • stores the array shown on-screen so zoom gets the right image
+        Honors the log-scale toggle and stores the on-screen FT for zoom tools.
         """
         view = self.holo_view_var.get()
         if view == "Hologram":
             disp_arr = self.arr_c_view
             title = "Hologram"
         else:
-            log = self.ft_mode_var.get().startswith("With")
-            disp_arr = self._generate_ft_display(self.arr_c_view, log_scale=log)
-            title = f"Fourier Transform ({'log' if log else 'linear'})"
+            use_log = self._is_log_scale_selected()
+            disp_arr = self._generate_ft_display(self.arr_c_view, log_scale=use_log)
+            title = f"Fourier Transform"
+
         self._last_ft_display = disp_arr.copy()
         pil = Image.fromarray(disp_arr)
         self.img_c = self._preserve_aspect_ratio_right(pil)
         self.captured_label.configure(image=self.img_c)
         self.captured_title_label.configure(text=title)
 
+
     def _get_current_array(self, what: str) -> np.ndarray | None:
         """
-        Return the numpy array that corresponds to *what*:
+        Return the numpy array corresponding to *what*:
         'Hologram', 'FT', 'Phase', 'Amplitude', etc.
         """
         if what in ("Hologram", "Hologram "):
             return self.arr_c_view
         if what in ("Fourier Transform", "FT"):
-            # rebuild FT if it wasn’t cached yet
             if not hasattr(self, "_last_ft_display"):
-                log = self.ft_mode_var.get().startswith("With")
                 self._last_ft_display = self._generate_ft_display(
-                    self.arr_c_view, log_scale=log)
+                    self.arr_c_view,
+                    log_scale=self._is_log_scale_selected()
+                )
             return self._last_ft_display
         if what == "Phase":
             if self.phase_arrays:
@@ -653,7 +679,7 @@ class App(ctk.CTk):
         if what == "Amplitude":
             if self.amplitude_arrays:
                 return self.amplitude_arrays[self.current_amp_index]
-        return None 
+        return None
 
     def zoom_holo_view(self, *args, **kwargs):
         tGUI.zoom_holo_view(self, *args, **kwargs)
@@ -701,7 +727,13 @@ class App(ctk.CTk):
         self.processed_title_label.configure(text=view_name)
 
     def _on_ft_mode_changed(self):
-        self._refresh_all_ft_views()
+        if hasattr(self, "_last_ft_display"):
+            try:
+                delattr(self, "_last_ft_display")
+            except Exception:
+                pass
+        # Repaint now so the user sees the change instantly
+        self.update_left_view()
 
     def _show_amp_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
@@ -719,12 +751,15 @@ class App(ctk.CTk):
             self.update_right_view()
 
     def _generate_ft_display(self, holo_array: np.ndarray, log_scale: bool = True) -> np.ndarray:
+        if holo_array is None or holo_array.size == 0:
+            return np.zeros((1, 1), dtype=np.uint8)
+
         ft_cplx = np.fft.fftshift(np.fft.fft2(holo_array.astype(np.float32)))
         mag = np.abs(ft_cplx)
         if log_scale:
             mag = np.log1p(mag)
-        mag = mag / (mag.max() + 1e-9) * 255.0
-        return mag.astype(np.uint8)
+        mag = mag / (mag.max() + 1e-12)
+        return (mag * 255.0).astype(np.uint8)
 
     def _generate_intensity_display(self, amp_array_8bit: np.ndarray) -> np.ndarray:
         amp_f = amp_array_8bit.astype(np.float32) / 255.0
@@ -790,7 +825,19 @@ class App(ctk.CTk):
         self.ft_coord_label.place_forget()
 
     def _refresh_all_ft_views(self):
-        if self.holo_view_var.get() == "Fourier Transform":
+        if hasattr(self, "_last_ft_display"):
+            try:
+                delattr(self, "_last_ft_display")
+            except Exception:
+                pass
+
+        try:
+            is_ft = isinstance(getattr(self, "holo_view_var", None), tk.StringVar) and \
+                    self.holo_view_var.get() == "Fourier Transform"
+        except Exception:
+            is_ft = False
+
+        if is_ft:
             self.update_left_view()
 
     def _hide_parameters_nav_button(self) -> None:
@@ -1515,12 +1562,12 @@ class App(ctk.CTk):
             # If that filter is active, refresh its numeric value
             if manual_var.get() and slider is not None:
                 handler(slider.get())
-
+    """
     def _update_recon_arrays(self,
                              amp_arr:   np.ndarray | None = None,
                              int_arr:   np.ndarray | None = None,
                              phase_arr: np.ndarray | None = None):
-        """
+ 
         # 1 ▏fetch result from the worker  (unchanged)
         if amp_arr is None or phase_arr is None:
             if not hasattr(self, "recon_output"):
@@ -1578,8 +1625,21 @@ class App(ctk.CTk):
             self.phase_arrays[0], self._active_cmap_phase)
 
         self._apply_live_speckle_if_active()
+    """
+    def _update_recon_arrays(self,
+                         amp_arr:   np.ndarray | None = None,
+                         int_arr:   np.ndarray | None = None,
+                         phase_arr: np.ndarray | None = None):
         """
-        # 1) Fetch result from the worker if not provided
+        Refresh internal buffers and thumbnails.
+
+        Matching the reference viewer:
+        - If the worker provided the complex field, derive amplitude from it and
+          scale by min–max per frame (no hard clipping).
+        - Phase is never normalized; it stays wrapped to [-pi, pi] and mapped to 8-bit.
+        """
+
+        # 1) Pull the worker’s packet
         if amp_arr is None or phase_arr is None:
             if not hasattr(self, "recon_output"):
                 return
@@ -1589,29 +1649,52 @@ class App(ctk.CTk):
             field     = self.recon_output.get("field")
         else:
             field = None
-
+    
         if amp_arr is None or phase_arr is None:
             return
-
-        # 2) Store pristine copies — NO amplitude normalisation here
+    
+        # 2) Build amplitude from the complex field when available
+        #    (this avoids the worker’s [0,1] clamp destroying contrast)
+        if field is not None:
+            a_f   = np.abs(field).astype(np.float32)
+            a_min = float(a_f.min())
+            a_max = float(a_f.max())
+            if a_max - a_min > 1e-9:
+                a_scaled = (a_f - a_min) / (a_max - a_min)
+            else:
+                a_scaled = np.zeros_like(a_f, dtype=np.float32)
+            amp_arr = (np.clip(a_scaled, 0.0, 1.0) * 255.0).astype(np.uint8)
+        
+        # 3) If we somehow have no field (fallback), but a reference was used,
+        #    at least min–max the 8-bit that came from the worker.
+        elif self.ref_path:
+            a_f = amp_arr.astype(np.float32)
+            rng = float(a_f.max() - a_f.min())
+            if rng > 1e-9:
+                amp_arr = ((a_f - a_f.min()) / rng * 255.0).astype(np.uint8)
+    
+        # 4) Store pristine copies
         self.original_amplitude_arrays = [amp_arr.copy()]
         self.original_phase_arrays     = [phase_arr.copy()]
         self.amplitude_arrays          = [amp_arr.copy()]
         self.phase_arrays              = [phase_arr.copy()]
-
-        if int_arr is not None:
-            self.original_intensity_arrays = [int_arr.copy()]
-            self.intensity_arrays          = [int_arr.copy()]
-
-        # 3) Complex field rebuild (unchanged)
+    
+        # Recompute intensity from the (possibly new) amplitude
+        intens = (amp_arr.astype(np.float32) / 255.0) ** 2
+        intens = (intens / (intens.max() + 1e-9) * 255.0).astype(np.uint8)
+        self.original_intensity_arrays = [intens.copy()]
+        self.intensity_arrays          = [intens.copy()]
+    
+        # 5) Ensure complex field is stored (either from worker or rebuilt)
         if field is None:
-            amp_f   = self.amplitude_arrays[0].astype(np.float32) / 255.0
-            phase_r = self.phase_arrays[0].astype(np.float32) / 255.0 * 2 * np.pi
+            amp_f   = amp_arr.astype(np.float32) / 255.0
+            phase_r = phase_arr.astype(np.float32) / 255.0 * 2 * np.pi
             field   = amp_f * np.exp(1j * phase_r)
         self.complex_fields = [field]
-
-        # 4) Re-apply saved filters / colour-maps (original logic)
+    
+        # 6) Re-apply saved filters / colormaps (existing logic)
         self._ensure_filter_state_lists_length()
+
         st_amp   = self.filter_states_dim1[0]
         st_phase = self.filter_states_dim2[0]
 
@@ -1627,8 +1710,8 @@ class App(ctk.CTk):
         self.phase_arrays[0] = self._apply_ui_colormap(
             self.phase_arrays[0], self._active_cmap_phase)
 
-        # 5) If live speckle is toggled, refresh with filtered buffers
         self._apply_live_speckle_if_active()
+
 
     def _remove_legacy_show_checkboxes(self):
         """Hide the old ‘Show Intensity’ and ‘Show Phase’ tick-boxes."""
@@ -1785,18 +1868,34 @@ class App(ctk.CTk):
         return (out * 255).astype(np.uint8)
 
     def _recompute_and_show(self, left: bool = False, right: bool = False):
-        """Build *display* images from pristine copies + checked filters."""
+        """Build display images from pristine copies + checked filters."""
         if left:
-            self.arr_c_view = self._run_filters_pipeline(self.arr_c_orig,
-                                                         use_left_side=True)
+            self.arr_c_view = self._run_filters_pipeline(self.arr_c_orig, use_left_side=True)
             self.arr_c = self.arr_c_view
-            im = Image.fromarray(self.arr_c_view)
-            self.img_c = self._preserve_aspect_ratio_right(im)
-            self.captured_label.configure(image=self.img_c)
+
+            showing_ft = False
+            try:
+                showing_ft = (self.holo_view_var.get() == "Fourier Transform")
+            except Exception:
+                showing_ft = False
+
+            if showing_ft:
+                log_mode = self._is_log_scale_selected()
+                disp_arr = self._generate_ft_display(self.arr_c_view, log_scale=log_mode)
+                self._last_ft_display = disp_arr.copy()
+                pil = Image.fromarray(disp_arr)
+                self.img_c = self._preserve_aspect_ratio_right(pil)
+                self.captured_label.configure(image=self.img_c)
+                self.captured_title_label.configure(
+                    text=f"Fourier Transform"
+                )
+            else:
+                im = Image.fromarray(self.arr_c_view)
+                self.img_c = self._preserve_aspect_ratio_right(im)
+                self.captured_label.configure(image=self.img_c)
 
         if right:
-            self.arr_r_view = self._run_filters_pipeline(self.arr_r_orig,
-                                                         use_left_side=False)
+            self.arr_r_view = self._run_filters_pipeline(self.arr_r_orig, use_left_side=False)
             self.arr_r = self.arr_r_view
             im = Image.fromarray(self.arr_r_view)
             self.img_r = self._preserve_aspect_ratio_right(im)
@@ -2258,11 +2357,11 @@ class App(ctk.CTk):
             return holo_u8, self.dxy                     # nothing to do
 
         h, w = holo_u8.shape
-        holo_ds = cv2.resize(
+        holo_ds = cv.resize(
             holo_u8,
             (w // self.DOWNSAMPLE_FACTOR,
              h // self.DOWNSAMPLE_FACTOR),
-            interpolation=cv2.INTER_AREA
+            interpolation=cv.INTER_AREA
         )
 
         dxy_eff = self.dxy * self.DOWNSAMPLE_FACTOR
@@ -2657,42 +2756,50 @@ class App(ctk.CTk):
      self.processed_label.configure(image=self.img_r)
  
     def selectfile(self):
-     """
-     Load **one** hologram and show it on the left viewer.
-     All previous reconstructions are cleared; the right viewer will stay
-     blank until the user hits **Compensate**.
-     """
-     # Fresh start --------------------------------------------------------------
-     self._reset_all_images()
- 
-     fp = ctk.filedialog.askopenfilename(title="Select an image file")
-     if not fp:
-         return
- 
-     # Left viewer – hologram ---------------------------------------------------
-     im = Image.open(fp).convert("L")
-     self.arr_c_orig = np.asarray(im)
-     self.current_holo_array = self.arr_c_orig.copy()
- 
-     self.original_multi_holo_arrays = [self.arr_c_orig.copy()]
-     self.multi_holo_arrays          = [self.arr_c_orig.copy()]
-     self._recompute_and_show(left=True)
- 
-     self.hologram_frames   = [self.img_c]
-     self.current_left_index = 0
- 
-     # Right viewer – completely blank -----------------------------------------
-     self._show_waiting_for_compensate()
- 
-     # One default filter‑state per dimension
-     self.filter_states_dim0 = [tGUI.default_filter_state()]
-     self.filter_states_dim1 = [tGUI.default_filter_state()]
-     self.filter_states_dim2 = [tGUI.default_filter_state()]
- 
-     # Force the user to press Compensate
-     self.need_recon = True
- 
-     self.hide_holo_arrows()
+        """
+        Load **one** hologram and show it on the left viewer.
+        All previous reconstructions are cleared; the right viewer will stay
+        blank until the user hits **Compensate**.
+
+        CHANGE: If the current left view is 'Fourier Transform', display the FT
+        immediately in the selected (linear/log) mode instead of the raw hologram.
+        """
+        # Fresh start
+        self._reset_all_images()
+
+        fp = ctk.filedialog.askopenfilename(title="Select an image file")
+        if not fp:
+            return
+
+        # Left viewer — hologram
+        im = Image.open(fp).convert("L")
+        self.arr_c_orig = np.asarray(im)
+        self.current_holo_array = self.arr_c_orig.copy()
+
+        self.original_multi_holo_arrays = [self.arr_c_orig.copy()]
+        self.multi_holo_arrays          = [self.arr_c_orig.copy()]
+        self._recompute_and_show(left=True)
+
+        self.hologram_frames    = [self.img_c]
+        self.current_left_index = 0
+
+        # Right viewer — blank until "Reconstruction"
+        self._show_waiting_for_compensate()
+
+        # One default filter-state per dimension
+        self.filter_states_dim0 = [tGUI.default_filter_state()]
+        self.filter_states_dim1 = [tGUI.default_filter_state()]
+        self.filter_states_dim2 = [tGUI.default_filter_state()]
+
+        self.need_recon = True
+        self.hide_holo_arrows()
+
+        # If the UI is currently on 'FT', force the FT render now in the chosen mode
+        try:
+            if self.holo_view_var.get() == "Fourier Transform":
+                self.update_left_view()
+        except Exception:
+            pass
 
     def selectref(self):
         self.ref_path = ctk.filedialog.askopenfilename(title='Select an image file')
@@ -2753,10 +2860,11 @@ class App(ctk.CTk):
         self.w_fps = fps or getattr(self, "w_fps", 0)
         self._draw_after_id = self.after(50, self.draw)
 
-    def check_current_FC(self):
-        self.FC = filtcosenoF(self.cosine_period, np.array((self.width, self.height)))
-        plt.imshow(self.FC, cmap='gray')
-        plt.show()
+    def check_current_FC(self) -> None:
+     """(Re)build the cosine filter used by Kreuzer."""
+     # Pick a square side – Kreuzer math expects square grids.
+     side = int(min(self.width, self.height))
+     self.current_FC = filtcosenoF(self.cosine_period, side)
 
     def set_FC_param(self, cosine_period):
         self.cosine_period = cosine_period

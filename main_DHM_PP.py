@@ -445,15 +445,9 @@ class App(ctk.CTk):
 
     def _show_ft_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
-        opts = ["With logarithmic scale", "Without logarithmic scale"]
-        for opt in opts:
-            menu.add_radiobutton(
-                label=opt, value=opt,
-                variable=self.ft_mode_var,
-                command=self._on_ft_mode_changed
-            )
-        menu.tk_popup(self.ft_mode_button.winfo_rootx(),
-                      self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
+        for opt in ("With logarithmic scale", "Without logarithmic scale"):
+            menu.add_radiobutton(label=opt,value=opt,variable=self.ft_mode_var,command=self._on_ft_mode_changed)
+        menu.tk_popup(self.ft_mode_button.winfo_rootx(),self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
 
     def get_load_menu_values(self):
         return ["Hologram", "Stack of holograms", "Sample"]
@@ -476,34 +470,48 @@ class App(ctk.CTk):
         Without logarithmic…”).  After regenerating the caches, the method also
         repaints the left viewer if it is showing a Fourier-Transform.
         """
-        # Single-Hologram case
-        if not getattr(self, "multi_holo_arrays", []):
-            src = getattr(self, "arr_hologram", None)
-            if src is None:
-                return
-            tk_ft, ft_disp = self._create_ft_frame(src)
-            self.ft_frames = [tk_ft]
-            self.multi_ft_arrays = [ft_disp]
+        if not hasattr(self, "ft_frames"):
+            self.ft_frames = []
+        if not hasattr(self, "multi_ft_arrays"):
+            self.multi_ft_arrays = []
+        # MULTI-HOLOGRAM path
+        if getattr(self, "multi_holo_arrays", None):
+            n = len(self.multi_holo_arrays)
+            # resize holders
+            self.ft_frames = (self.ft_frames + [None] * n)[:n]
+            self.multi_ft_arrays = (self.multi_ft_arrays + [None] * n)[:n]
+            for i, holo in enumerate(self.multi_holo_arrays):
+                tk_ft, ft_disp = self._create_ft_frame(holo)
+                self.ft_frames[i] = tk_ft
+                self.multi_ft_arrays[i] = ft_disp  # keep arrays in sync for saving
+            # If FT currently shown, repaint active index
             if self.holo_view_var.get() == "Fourier Transform":
-                self.captured_label.configure(image=tk_ft)
-                self.captured_label.image = tk_ft
-                self.current_ft_array = ft_disp
+                idx = getattr(self, "current_left_index", 0)
+                self.captured_title_label.configure(text=f"Fourier Transform")
+                self.captured_label.configure(image=self.ft_frames[idx])
+                self.captured_label.image = self.ft_frames[idx]
+                self.current_ft_array = self.multi_ft_arrays[idx]
             return
-
-        # Multi-Hologram case
-        for i, src in enumerate(self.multi_holo_arrays):
-            tk_ft, ft_disp = self._create_ft_frame(src)
-            self.ft_frames[i] = tk_ft
-            self.multi_ft_arrays[i] = ft_disp
-
-        # If the user is currently looking at an FT, update that widget too
+        # SINGLE-HOLOGRAM path
+        if getattr(self, "arr_hologram", None) is None:
+            return
+        tk_ft, ft_disp = self._create_ft_frame(self.arr_hologram)
+        self.current_ft_array = ft_disp
+        if len(self.multi_ft_arrays) == 0:
+            self.multi_ft_arrays.append(ft_disp)
+        else:
+            self.multi_ft_arrays[0] = ft_disp
         if self.holo_view_var.get() == "Fourier Transform":
-            idx = getattr(self, "current_left_index", 0)
-            self.captured_label.configure(image=self.ft_frames[idx])
-            self.captured_label.image = self.ft_frames[idx]
-            self.current_ft_array = self.multi_ft_arrays[idx]
+            self.captured_title_label.configure(text=f"Fourier Transform")
+            self.captured_label.configure(image=tk_ft)
+            self.captured_label.image = tk_ft
 
     def _on_ft_mode_changed(self):
+        if hasattr(self, "_last_ft_display"):
+            try:
+                delattr(self, "_last_ft_display")
+            except Exception:
+                pass
         self._refresh_all_ft_views()
 
     def _show_amp_mode_menu(self):
@@ -522,13 +530,31 @@ class App(ctk.CTk):
         if self.recon_view_var.get() == "Amplitude Reconstruction ":
             self.update_right_view()
 
+    def _init_ft_defaults(self):
+        if not hasattr(self, "ft_mode_var"):
+            self.ft_mode_var = tk.StringVar(value="With logarithmic scale")
+        if not hasattr(self, "amp_mode_var"):
+            self.amp_mode_var = tk.StringVar(value="Amplitude")
+
+    def _is_log_scale_selected(self) -> bool:
+        try:
+            return str(self.ft_mode_var.get()) == "With logarithmic scale"
+        except Exception:
+            # Safe default
+            return True
+
     def _generate_ft_display(self, holo_array: np.ndarray, log_scale: bool = True) -> np.ndarray:
-        ft_cplx = utilities.FT(holo_array)
-        mag = np.abs(ft_cplx)
+        """
+        Compute centered 2D-FFT magnitude (uint8) with optional log compression.
+        """
+        if holo_array is None or holo_array.size == 0:
+            return np.zeros((1, 1), dtype=np.uint8)
+        f = np.fft.fftshift(np.fft.fft2(holo_array.astype(np.float32)))
+        mag = np.abs(f)
         if log_scale:
-            mag = np.log1p(mag)
-        mag = mag / (mag.max() + 1e-9) * 255.0
-        return mag.astype(np.uint8)
+            mag = np.log1p(mag)  # dynamic-range compression
+        mag = mag / (mag.max() + 1e-12)
+        return (mag * 255.0).astype(np.uint8)
 
     def _generate_intensity_display(self, amp_array_8bit: np.ndarray) -> np.ndarray:
         amp_f = amp_array_8bit.astype(np.float32) / 255.0
@@ -591,46 +617,37 @@ class App(ctk.CTk):
         tGUI.load_ui_from_filter_state(self, dimension=0, index=self.current_left_index)
 
     def update_left_view(self):
+
         choice = self.holo_view_var.get()
 
-        # If no multi-hologram list yet, fall back to single arrays
-        if not hasattr(self, 'multi_holo_arrays') or len(self.multi_holo_arrays) == 0:
+        # No multi-hologram list yet → single array path
+        if not hasattr(self, "multi_holo_arrays") or len(self.multi_holo_arrays) == 0:
             if choice == "Hologram":
                 self.captured_title_label.configure(text="Hologram")
                 self.captured_label.configure(image=self.img_hologram)
                 self.current_holo_array = self.arr_hologram
             else:  # Fourier Transform
-                holo_src = self.arr_hologram
-                use_log = self.ft_mode_var.get().startswith("With")
-                ft_disp = self._generate_ft_display(holo_src, use_log)
-                tk_ft = self._preserve_aspect_ratio(
-                    Image.fromarray(ft_disp),
-                    self.viewbox_width, self.viewbox_height
-                )
-                self.captured_title_label.configure(text="Fourier Transform")
+                tk_ft, ft_disp = self._create_ft_frame(self.arr_hologram)
+                self.captured_title_label.configure(
+                    text=f"Fourier Transform ({'log' if self._is_log_scale_selected() else 'linear'})")
                 self.captured_label.configure(image=tk_ft)
-                self.captured_label.image = tk_ft  # type: ignore
+                self.captured_label.image = tk_ft  # keep ref
                 self.current_ft_array = ft_disp
             return
 
         # Multiple holograms loaded
-        idx = getattr(self, 'current_left_index', 0)
+        idx = getattr(self, "current_left_index", 0)
         if choice == "Hologram":
             self.captured_title_label.configure(text="Hologram")
             self.captured_label.configure(image=self.hologram_frames[idx])
             self.captured_label.image = self.hologram_frames[idx]
             self.current_holo_array = self.multi_holo_arrays[idx]
         else:  # Fourier Transform
-            holo_src = self.multi_holo_arrays[idx]
-            use_log = self.ft_mode_var.get().startswith("With")
-            ft_disp = self._generate_ft_display(holo_src, use_log)
-            tk_ft = self._preserve_aspect_ratio(
-                Image.fromarray(ft_disp),
-                self.viewbox_width, self.viewbox_height
-            )
-            self.captured_title_label.configure(text="Fourier Transform")
+            tk_ft, ft_disp = self._create_ft_frame(self.multi_holo_arrays[idx])
+            self.captured_title_label.configure(
+                text=f"Fourier Transform")
             self.captured_label.configure(image=tk_ft)
-            self.captured_label.image = tk_ft  # type: ignore
+            self.captured_label.image = tk_ft
             self.current_ft_array = ft_disp
 
         # Keep all original arrow / UI-state logic
@@ -838,15 +855,12 @@ class App(ctk.CTk):
         fits in the left view-box.  It always obeys the setting in
         `self.ft_mode_var` (“With logarithmic scale” / “Without …”).
         """
-        use_log = self.ft_mode_var.get().startswith("With")
-        ft_disp = self._generate_ft_display(holo_array, log_scale=use_log)
-
-        tk_ft = self._preserve_aspect_ratio(
-            Image.fromarray(ft_disp),
-            self.viewbox_width,
-            self.viewbox_height
+        ft_u8 = self._generate_ft_display(holo_array, log_scale=self._is_log_scale_selected())
+        tk_img = self._preserve_aspect_ratio(
+            Image.fromarray(ft_u8),
+            self.viewbox_width, self.viewbox_height
         )
-        return tk_ft, ft_disp
+        return tk_img, ft_u8
 
     # ────────────────────────────────────────────────────────────
     # Load hologram for phase compensation
