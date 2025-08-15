@@ -21,8 +21,6 @@ def read(filename:str, path:str = '') -> np.ndarray:
     im = cv2.imread(prefix + filename, cv2.IMREAD_GRAYSCALE) #you can pass multiple arguments in single line
     return im.astype(np.float64)
 
-
-
 def propagate(field, z, wavelength, dx, dy, scale_factor=1):
     # Inputs:
     # field - complex field
@@ -66,6 +64,7 @@ def ang_spectrum(field, z, wavelength, dx, dy):
     return out
 
 def _fts(A):   return np.fft.fftshift(np.fft.fft2 (np.fft.ifftshift(A)))
+
 def _ifts(A):  return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(A)))
 
 def dlhm_rec(hologram, L, z, W_c, dx_out, wavelength):
