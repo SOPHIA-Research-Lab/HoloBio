@@ -70,7 +70,6 @@ def _ifts(A):  return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(A)))
 def dlhm_rec(hologram, L, z, W_c, dx_out, wavelength):
     """
     Digital Lensless Holographic Microscopy reconstruction.
-    Devuelve (amplitud, fase) con la misma forma que el holograma.
     """
     # ------------------------------------------------------------------
     N, M = hologram.shape      # filas, columnas  (Q, P)
@@ -111,29 +110,19 @@ def dlhm_rec(hologram, L, z, W_c, dx_out, wavelength):
     return amp, phase
 
 def filtcosenoF(par: int, fi, num_fig: int) -> np.ndarray:
-    """
-    Filtro cosenoidal 2D cuadrado.
-    - par: periodo (en píxeles) del coseno al que quieres dar paso
-    - fi : tamaño del filtro. Puede ser:
-           • int  -> lado del cuadrado
-           • tuple/list/ndarray -> (W, H) y se toma min(W, H)
-    - num_fig: si != 0 muestra la figura (opcional; aquí no se usa)
-    """
-    # Acepta fi como entero o (W,H)
+ 
     if isinstance(fi, (tuple, list, np.ndarray)):
         side = int(min(int(fi[0]), int(fi[1])))
     else:
         side = int(fi)
 
-    # Coordenadas cuadradas
+ 
     Xfc, Yfc = np.meshgrid(
         np.linspace(-side/2, side/2, side),
         np.linspace( side/2, -side/2, side),
         indexing="xy"
     )
-
-    # Filtros cosenoidales horizontales y verticales
-    # Se normaliza por el máximo para mantener [0,1]
+ 
     FC1 = np.cos(Xfc * (np.pi / par) * (1.0 / np.max(np.abs(Xfc)))) ** 2
     FC2 = np.cos(Yfc * (np.pi / par) * (1.0 / np.max(np.abs(Yfc)))) ** 2
 
@@ -143,10 +132,7 @@ def filtcosenoF(par: int, fi, num_fig: int) -> np.ndarray:
     return FC
 
 def prepairholoF(CH_m: np.ndarray, xop: float, yop: float, Xp: np.ndarray, Yp: np.ndarray) -> np.ndarray:
-    """
-    Remapeo geométrico (vecinos “área” al estilo de tu referencia).
-    Idéntico a tu notebook, solo tipeado y con floats explícitos.
-    """
+ 
     row, _ = CH_m.shape
     Xcoord = (Xp - xop) / (-2.0 * xop / row)
     Ycoord = (Yp - yop) / (-2.0 * xop / row)
@@ -185,12 +171,7 @@ def kreuzer3F(z: float,
               pixel_pitch_out: float,
               L: float,
               FC: np.ndarray) -> np.ndarray:
-    """
-    Reconstrucción de Kreuzer (idéntica en forma a tu referencia).
-    - Recorta a cuadrado (center-crop) para evitar 1023×1024, etc.
-    - Usa exactamente la misma secuencia de fases/convulsiones.
-    """
-    # --- recorte cuadrado (center-crop) ---
+ 
     h, w = field.shape
     row = int(min(h, w))
     y0 = (h - row) // 2
