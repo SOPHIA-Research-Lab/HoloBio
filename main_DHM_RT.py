@@ -1,3 +1,4 @@
+
 import zipfile, io
 import customtkinter as ctk
 from parallel_rc import *
@@ -1927,7 +1928,7 @@ class App(ctk.CTk):
         # Panel title
         self.filter_label_pc = ctk.CTkLabel(
             self.filter_pc_frame,
-            text="Compensation and FT Visualization Options",
+            text="FT Visualization Options",
             font=ctk.CTkFont(weight="bold")
         )
         self.filter_label_pc.grid(row=0, column=0, columnspan=2, padx=5, pady=(5, 2), sticky="w")
@@ -1935,7 +1936,7 @@ class App(ctk.CTk):
         # Geometry filter selector
         geometry_label = ctk.CTkLabel(
             self.filter_pc_frame,
-            text="Choose spatial filter geometry:"
+            text="Spatial Filter Geometry:"
         )
         geometry_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
 
@@ -1950,13 +1951,13 @@ class App(ctk.CTk):
         # FT visualization options
         self.ft_display_var = tk.StringVar(value="unfiltered")
         ctk.CTkRadioButton(
-            self.filter_pc_frame, text="Show FT filtered",
+            self.filter_pc_frame, text="Show FT Filtered",
             variable=self.ft_display_var, value="filtered",
             command=self.show_ft_filtered
         ).grid(row=2, column=0, padx=5, pady=(5, 0), sticky="w")
 
         ctk.CTkRadioButton(
-            self.filter_pc_frame, text="Show FT unfiltered",
+            self.filter_pc_frame, text="Show FT Unfiltered",
             variable=self.ft_display_var, value="unfiltered",
             command=self.show_ft_unfiltered
         ).grid(row=2, column=1, padx=5, pady=(5, 0), sticky="w")
@@ -2001,7 +2002,7 @@ class App(ctk.CTk):
         self.record_frame = ctk.CTkFrame(
             self.phase_compensation_inner_frame,
             width=PARAMETER_FRAME_WIDTH,
-            height=90
+            height=80
         )
         self.record_frame.grid(row=4, column=0, sticky="ew", pady=(2, 6))
         self.record_frame.grid_propagate(False)
@@ -2013,11 +2014,11 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.record_frame,
                      text="Record Options",
                      font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, columnspan=5, padx=10, pady=(10, 5), sticky="w"
+            row=0, column=0, columnspan=5, padx=10, pady=(5, 5), sticky="w"
         )
 
         ctk.CTkLabel(self.record_frame, text="Record").grid(
-            row=1, column=0, padx=(10, 5), pady=(10, 5), sticky="w"
+            row=1, column=0, padx=(10, 5), pady=(3, 5), sticky="w"
         )
 
         self.record_var = ctk.StringVar(value="Phase")
@@ -2026,17 +2027,17 @@ class App(ctk.CTk):
             values=["Phase", "Amplitude", "Hologram"],
             variable=self.record_var,
             width=120
-        ).grid(row=1, column=1, padx=(0, 5), pady=(10, 5), sticky="w")
+        ).grid(row=1, column=1, padx=(0, 5), pady=(3, 5), sticky="w")
 
         ctk.CTkButton(
             self.record_frame, text="Start", width=70,
             command=self.start_record
-        ).grid(row=1, column=2, padx=(0, 5), pady=(10, 5), sticky="ew")
+        ).grid(row=1, column=2, padx=(0, 5), pady=(3, 5), sticky="ew")
 
         ctk.CTkButton(
             self.record_frame, text="Stop", width=70,
             command=self.stop_recording
-        ).grid(row=1, column=3, padx=(0, 10), pady=(10, 5), sticky="ew")
+        ).grid(row=1, column=3, padx=(0, 10), pady=(3, 5), sticky="ew")
 
         # NEW: Create the "● REC" indicator label and keep it hidden until recording starts
         self.record_indicator = ctk.CTkLabel(
@@ -2046,7 +2047,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(weight="bold")
         )
         # Place it in the new column 4, aligned to the right
-        self.record_indicator.grid(row=1, column=4, padx=(0, 10), pady=(10, 5), sticky="e")
+        self.record_indicator.grid(row=1, column=4, padx=(0, 10), pady=(3, 5), sticky="e")
         # Hide by default; start_record() will call grid() to show it
         self.record_indicator.grid_remove()
 
@@ -2216,7 +2217,7 @@ class App(ctk.CTk):
                 pitch_y=pitch_y
             )
 
-            self.df_positions_vector = df_positions_vector  
+            self.df_positions_vector = df_positions_vector
             self.show_dataframe_in_table(self.df_positions_vector, title="Positions vector")
 
             print("Tracking completed. Total trajectories:", len(trajectories))
@@ -2232,7 +2233,7 @@ class App(ctk.CTk):
             df.rename(columns={df.columns[0]: "frame"}, inplace=True)
 
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = ["frame"] + [f"Particle {pid}_{coord}" 
+            df.columns = ["frame"] + [f"Particle {pid}_{coord}"
                                     for coord, pid in df.columns[1:]]
         else:
             new_cols = []
