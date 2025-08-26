@@ -201,7 +201,7 @@ def track_particles_kalman(
     df_full["y"] = df_full["y"].round(2)
     df_pivot = df_full.pivot(index="frame", columns="particle_id", values=["x", "y"])
     df_pivot = df_pivot.swaplevel(axis=1).sort_index(axis=1, level=0)
-    df_pivot.columns = [f"Particle {pid}_{coord}" for pid, coord in df_pivot.columns]
+    df_pivot.columns = [f"P{pid}_{coord}" for pid, coord in df_pivot.columns]
     df_positions_vector = df_pivot.reset_index().rename(columns={"frame": "frames"})
 
     if use_world_coords:

@@ -2233,7 +2233,7 @@ class App(ctk.CTk):
             df.rename(columns={df.columns[0]: "frame"}, inplace=True)
 
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = ["frame"] + [f"Particle {pid}_{coord}"
+            df.columns = ["frame"] + [f"P{pid}_{coord}"
                                     for coord, pid in df.columns[1:]]
         else:
             new_cols = []
@@ -2242,7 +2242,7 @@ class App(ctk.CTk):
                     match = re.match(r".*?(\d+).*?([xy])", col, re.IGNORECASE)
                     if match:
                         pid, coord = match.groups()
-                        new_cols.append(f"Particle {pid}_{coord}")
+                        new_cols.append(f"P{pid}_{coord}")
                     else:
                         new_cols.append(col)
                 else:
