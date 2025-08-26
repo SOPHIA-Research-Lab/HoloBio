@@ -209,10 +209,18 @@ def track_particles_kalman(
     df_full = pd.DataFrame(all_positions)
     df_full["x"] = df_full["x"].round(2)
     df_full["y"] = df_full["y"].round(2)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_time_s = 1 / fps if fps > 0 else None
+    if frame_time_s is not None:
+        df_full["time_s"] = df_full["frame"] * frame_time_s
     df_pivot = df_full.pivot(index="frame", columns="particle_id", values=["x", "y"])
     df_pivot = df_pivot.swaplevel(axis=1).sort_index(axis=1, level=0)
     df_pivot.columns = [f"P{pid}_{coord}" for pid, coord in df_pivot.columns]
     df_positions_vector = df_pivot.reset_index().rename(columns={"frame": "frames"})
+    if frame_time_s is not None:
+        df_positions_vector["time_s"] = df_positions_vector["frames"] * frame_time_s
+        cols = ["frames", "time_s"] + [c for c in df_positions_vector.columns if c not in ["frames", "time_s"]]
+        df_positions_vector = df_positions_vector[cols]
 
     if use_world_coords:
         
