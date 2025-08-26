@@ -169,17 +169,27 @@ def track_particles_kalman(
     
     for i, traj in enumerate(all_trajectories):
         traj_array = np.array(traj)
+        if use_world_coords:
+            pixel_size_x_um = pitch_x / magnification
+            pixel_size_y_um = pitch_y / magnification
+            traj_array[:, 0] *= pixel_size_x_um
+            traj_array[:, 1] *= pixel_size_y_um
+
         if len(traj_array) > 1:
             ax_main.plot(traj_array[:, 0], traj_array[:, 1], label=f'Particle {i}')
             ax_main.scatter(traj_array[0, 0], traj_array[0, 1], marker='o', c='green')  # start
             ax_main.scatter(traj_array[-1, 0], traj_array[-1, 1], marker='x', c='red')  # final
             ax_main.text(traj_array[-1, 0] + 10, traj_array[-1, 1] - 10, f'{i}', 
-             color='blue', fontsize=10, weight='bold')
+                        color='blue', fontsize=10, weight='bold')
 
     ax_main.invert_yaxis()
     ax_main.set_title("Trajectories of Tracked Particles")
-    ax_main.set_xlabel("X (pixels)")
-    ax_main.set_ylabel("Y (pixels)")
+    if use_world_coords:
+        ax_main.set_xlabel("X (µm)")
+        ax_main.set_ylabel("Y (µm)")
+    else:
+        ax_main.set_xlabel("X (pixels)")
+        ax_main.set_ylabel("Y (pixels)")
     ax_main.grid(True)
     fig_main.tight_layout()
     plt.show(block=False)
