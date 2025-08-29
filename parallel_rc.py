@@ -1,16 +1,167 @@
 import numpy as np
-from numpy.fft import fftshift, fft2, ifftshift, ifft2
-from scipy.ndimage import map_coordinates
-import matplotlib.pyplot as plt
-import cv2 as cv
 import time
 from customtkinter import CTkImage
 from multiprocessing import Queue
+#from kreuzer_functions import (kreuzer3F,filtcosenoF,dlhm_rec)
 from skimage import exposure, filters
+import cv2 as cv                          
 from settings import *
+import math as mt
+from matplotlib import pyplot as plt
 from PIL import Image
+import glob
+from datetime import datetime
 import hashlib
 from functools import lru_cache
+
+def dlhm_rec(hologram, L, z, W_c, dx_out, wavelength):
+
+    N, M = hologram.shape
+
+    # The discretization on the camera is set as the same input's discretization
+    P = M
+    Q = N
+
+    # Magnification factor
+    Mag = L / z
+
+    Mag_max = np.sqrt(W_c ** 2 / 2 + L ** 2) / z
+    Dist_max = np.abs(Mag_max - Mag)
+    # Apply distortion to the hologram
+    camMat = np.array([[P, 0, P / 2], [0, Q, Q / 2], [0, 0, 1]])
+    distCoeffs = np.array([Dist_max / (2 * Mag), 0, 0, 0, 0])  # Radial distortion parameters
+    hologram = cv.undistort(hologram.astype(np.float32), camMat, distCoeffs)
+
+    # Wave number
+    k = 2 * np.pi / wavelength
+
+    # Spatial coordinates in the camera's plane
+    x = np.linspace(-W_c / 2, W_c / 2, P)
+    y = np.linspace(-W_c / 2, W_c / 2, Q)
+
+    # Spatial frequency coordinates at the sample's plane
+    dfx = Mag / (dx_out * M)
+    dfy = Mag / (dx_out * N)
+    fx, fy = np.meshgrid(np.arange(-M / 2 * dfx, M / 2 * dfx, dfx),
+                         np.arange(-N / 2 * dfy, N / 2 * dfy, dfy))
+
+    # Propagation kernel for the Angular Spectrum Method (ASM)
+    E = np.exp(1j * (L - z) * np.sqrt(k ** 2 - 4 * np.pi ** 2 * (fx ** 2 + fy ** 2)))
+
+    # Compute hologram using inverse Fourier transform
+    Uz = ifts(fts(hologram) * E)
+
+    return np.abs(Uz), np.angle(np.conj(Uz))
+
+def ifts(A):
+    return np.fft.ifftshift(np.fft.ifft2(np.fft.fftshift(A)))
+
+def fts(A):
+    return np.fft.ifftshift(np.fft.fft2(np.fft.fftshift(A)))
+
+def filtcosenoF(par, fi, num_fig):
+    # Coordinates
+    Xfc, Yfc = np.meshgrid(np.linspace(-fi / 2, fi / 2, fi), np.linspace(fi / 2, -fi / 2, fi))
+    # Normalize coordinates [-π,π] and create horizontal and vertical filters
+    FC1 = np.cos(Xfc * (np.pi / par) * (1 / Xfc.max())) ** 2
+    FC2 = np.cos(Yfc * (np.pi / par) * (1 / Yfc.max())) ** 2
+    # Intersection
+    FC = (FC1 > 0) * (FC1) * (FC2 > 0) * (FC2)
+    # Rescale
+    FC = FC / FC.max()
+    if num_fig != 0:
+        fig = px.imshow(FC)
+        fig.show()
+    return FC
+
+def prepairholoF(CH_m, xop, yop, Xp, Yp):
+        # User function to prepare the hologram using nearest neihgboor interpolation strategy
+        [row, a] = CH_m.shape
+        # New coordinates measured in units of the -2*xop/row pixel size
+        Xcoord = (Xp - xop) / (-2 * xop / row)
+        Ycoord = (Yp - yop) / (-2 * xop / row)
+        # Find lowest integer
+        iXcoord = np.floor(Xcoord)
+        iYcoord = np.floor(Ycoord)
+        # Assure there isn't null pixel positions
+        iXcoord[iXcoord == 0] = 1
+        iYcoord[iYcoord == 0] = 1
+        # Calculate the fractionating for interpolation
+        x1frac = (iXcoord + 1.0) - Xcoord  # Upper value to integer
+        x2frac = 1.0 - x1frac
+        y1frac = (iYcoord + 1.0) - Ycoord  # Lower value to integer
+        y2frac = 1.0 - y1frac
+        x1y1 = x1frac * y1frac  # Corresponding pixel areas for each direction
+        x1y2 = x1frac * y2frac
+        x2y1 = x2frac * y1frac
+        x2y2 = x2frac * y2frac
+        # Pre allocate the prepared hologram
+        CHp_m = np.zeros([row, row])
+        # Prepare hologram (preparation - every pixel remapping)
+        for it in range(0, row - 2):
+            for jt in range(0, row - 2):
+                CHp_m[int(iYcoord[it, jt]), int(iXcoord[it, jt])] = CHp_m[int(iYcoord[it, jt]), int(iXcoord[it, jt])] + (
+                    x1y1[it, jt]) * CH_m[it, jt]
+                CHp_m[int(iYcoord[it, jt]), int(iXcoord[it, jt]) + 1] = CHp_m[int(iYcoord[it, jt]), int(
+                    iXcoord[it, jt]) + 1] + (x2y1[it, jt]) * CH_m[it, jt]
+                CHp_m[int(iYcoord[it, jt]) + 1, int(iXcoord[it, jt])] = CHp_m[int(iYcoord[it, jt]) + 1, int(
+                    iXcoord[it, jt])] + (x1y2[it, jt]) * CH_m[it, jt]
+                CHp_m[int(iYcoord[it, jt]) + 1, int(iXcoord[it, jt]) + 1] = CHp_m[int(iYcoord[it, jt]) + 1, int(
+                    iXcoord[it, jt]) + 1] + (x2y2[it, jt]) * CH_m[it, jt]
+
+        return CHp_m
+
+def kreuzer3F(z, field, wavelength, pixel_pitch_in, pixel_pitch_out, L, FC):
+    dx = pixel_pitch_in
+    dX = pixel_pitch_out
+    # Squared pixels
+    deltaY = dX
+    # Matrix size
+    [row, a] = field.shape
+    # Parameters
+    k = 2 * np.pi / wavelength
+    W = dx * row
+    #  Matrix coordinates
+    delta = np.linspace(1, row, num=row)
+    [X, Y] = np.meshgrid(delta, delta)
+    # Hologram origin coordinates
+    xo = -W / 2
+    yo = -W / 2
+    # Prepared hologram, coordinates origin
+    xop = xo * L / np.sqrt(L ** 2 + xo ** 2)
+    yop = yo * L / np.sqrt(L ** 2 + yo ** 2)
+    # Pixel size for the prepared hologram (squared)
+    deltaxp = xop / (-row / 2)
+    deltayp = deltaxp
+    # Coordinates origin for the reconstruction plane
+    Yo = -dX * row / 2
+    Xo = -dX * row / 2
+    Xp = (dx * (X - row / 2) * L / (np.sqrt(L ** 2 + (dx ** 2) * (X - row / 2) ** 2 + (dx ** 2) * (Y - row / 2) ** 2)))
+    Yp = (dx * (Y - row / 2) * L / (np.sqrt(L ** 2 + (dx ** 2) * (X - row / 2) ** 2 + (dx ** 2) * (Y - row / 2) ** 2)))
+    # Preparation of the hologram
+    CHp_m = prepairholoF(field, xop, yop, Xp, Yp)
+    # Multiply prepared hologram with propagation phase
+    Rp = np.sqrt((L ** 2) - (deltaxp * X + xop) ** 2 - (deltayp * Y + yop) ** 2)
+    r = np.sqrt((dX ** 2) * ((X - row / 2) ** 2 + (Y - row / 2) ** 2) + z ** 2)
+    CHp_m = CHp_m * ((L / Rp) ** 4) * np.exp(-0.5 * 1j * k * (r ** 2 - 2 * z * L) * Rp / (L ** 2))
+    # Padding constant value
+    pad = int(row / 2)
+    # Padding on the cosine rowlter
+    FC = np.pad(FC, (int(pad), int(pad)))
+    # Convolution operation
+    # First transform
+    T1 = CHp_m * np.exp((1j * k / (2 * L)) * (2 * Xo * X * deltaxp + 2 * Yo * Y * deltayp + X ** 2 * deltaxp * dX + Y ** 2 * deltayp * deltaY))
+    T1 = np.pad(T1, (int(pad), int(pad)))
+    T1 = fts(T1 * FC)
+    # Second transform
+    T2 = np.exp(-1j * (k / (2 * L)) * ((X - row / 2) ** 2 * deltaxp * dX + (Y - row / 2) ** 2 * deltayp * deltaY))
+    T2 = np.pad(T2, (int(pad), int(pad)))
+    T2 = fts(T2 * FC)
+    # Third transform
+    K = ifts(T2 * T1)
+    K = K[pad + 1:pad + row, pad + 1: pad + row]
+
+    return K
 
 def read(filename:str, path:str = '') -> np.ndarray:
     '''Reads image to double precision 2D array.'''
@@ -18,216 +169,8 @@ def read(filename:str, path:str = '') -> np.ndarray:
         prefix = path + '\x5c'
     else:
         prefix = ''
-    im = cv2.imread(prefix + filename, cv2.IMREAD_GRAYSCALE) #you can pass multiple arguments in single line
+    im = cv.imread(prefix + filename, cv.IMREAD_GRAYSCALE) #you can pass multiple arguments in single line
     return im.astype(np.float64)
-
-def propagate(field, z, wavelength, dx, dy, scale_factor=1):
-    # Inputs:
-    # field - complex field
-    # wavelength - wavelength
-    # z - propagation distance
-    # dxy - sampling pitches
-    field = np.array(field)
-    M, N = field.shape
-    x = np.arange(0, N, 1)  # array x
-    y = np.arange(0, M, 1)  # array y
-    X, Y = np.meshgrid(x - (N / 2), y - (M / 2), indexing='xy')
-
-    dfx = 1 / (dx * N)
-    dfy = 1 / (dy * M)
-
-    field_spec = np.fft.fftshift(field)
-    field_spec = np.fft.fft2(field_spec)
-    field_spec = np.fft.fftshift(field_spec)
-
-    kernel = np.power(1 / wavelength, 2) - (np.power(X * dfx, 2) + np.power(Y * dfy, 2)) + 0j
-    phase = np.exp(1j * z * scale_factor * 2 * np.pi * np.sqrt(kernel))
-
-    tmp = field_spec * phase
-    out = np.fft.ifftshift(tmp)
-    out = np.fft.ifft2(out)
-    out = np.fft.ifftshift(out)
-
-    return out
-
-def ang_spectrum(field, z, wavelength, dx, dy):
- 
-    N, M = field.shape
-    m, n = np.meshgrid(np.arange(1 - M / 2, M / 2 + 1), np.arange(1 - N / 2, N / 2 + 1))
-    dfx = 1 / (dx * M)
-    dfy = 1 / (dy * N)
-
-    field_spec = fftshift(fft2(fftshift(field)))
-    phase = np.exp(1j * z * 2 * np.pi * np.sqrt((1 / wavelength) ** 2 - (m * dfx) ** 2 - (n * dfy) ** 2))
-    out = ifftshift(ifft2(ifftshift(field_spec * phase)))
-
-    return out
-
-def _fts(A):   return np.fft.fftshift(np.fft.fft2 (np.fft.ifftshift(A)))
-
-def _ifts(A):  return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(A)))
-
-def dlhm_rec(hologram, L, z, W_c, dx_out, wavelength):
-    """
-    Digital Lensless Holographic Microscopy reconstruction.
-    """
-    # ------------------------------------------------------------------
-    N, M = hologram.shape      # filas, columnas  (Q, P)
-    Mag  = L / z               # factor de ampliación nominal
-
-    # --- corrección de distorsión radial ------------------------------
-    Mag_max   = np.sqrt(W_c**2 / 2 + L**2) / z
-    dist_max  = abs(Mag_max - Mag)
-    cam_mat   = np.array([[M, 0, M/2],
-                          [0, N, N/2],
-                          [0, 0,   1]], dtype=np.float32)
-    dist_coef = np.array([dist_max / (2*Mag), 0, 0, 0, 0],
-                         dtype=np.float32)
-
-    holo_corr = cv.undistort(hologram.astype(np.float32),
-                              cam_mat, dist_coef)
-
-    # --- malla de frecuencias espaciales (¡tamaño exacto!) ------------
-    dfx = Mag / (dx_out * M)
-    dfy = Mag / (dx_out * N)
-
-    ix = np.arange(-M//2, M//2) * dfx         # longitud M
-    iy = np.arange(-N//2, N//2) * dfy         # longitud N
-    fx, fy = np.meshgrid(ix, iy)              # N×M  —— sin “+1”
-
-    # --- kernel ASM ---------------------------------------------------
-    k  = 2*np.pi / wavelength
-    E  = np.exp(1j*(L - z) *
-                np.sqrt(np.maximum(k**2 - (2*np.pi*fx)**2 - (2*np.pi*fy)**2,
-                                   0.0)))     # clip valores negativos
-
-    # --- propagación --------------------------------------------------
-    Uz = _ifts(_fts(holo_corr) * E)
-
-    amp   = np.abs(Uz)
-    phase = np.angle(np.conj(Uz))             # [-π, π]
-
-    return amp, phase
-
-def filtcosenoF(par: int, fi, num_fig: int) -> np.ndarray:
- 
-    if isinstance(fi, (tuple, list, np.ndarray)):
-        side = int(min(int(fi[0]), int(fi[1])))
-    else:
-        side = int(fi)
-
- 
-    Xfc, Yfc = np.meshgrid(
-        np.linspace(-side/2, side/2, side),
-        np.linspace( side/2, -side/2, side),
-        indexing="xy"
-    )
- 
-    FC1 = np.cos(Xfc * (np.pi / par) * (1.0 / np.max(np.abs(Xfc)))) ** 2
-    FC2 = np.cos(Yfc * (np.pi / par) * (1.0 / np.max(np.abs(Yfc)))) ** 2
-
-    FC = (FC1 > 0) * FC1 * (FC2 > 0) * FC2
-    FC = FC / (FC.max() + 1e-12)
-
-    return FC
-
-def prepairholoF(CH_m: np.ndarray, xop: float, yop: float, Xp: np.ndarray, Yp: np.ndarray) -> np.ndarray:
- 
-    row, _ = CH_m.shape
-    Xcoord = (Xp - xop) / (-2.0 * xop / row)
-    Ycoord = (Yp - yop) / (-2.0 * xop / row)
-
-    iXcoord = np.floor(Xcoord)
-    iYcoord = np.floor(Ycoord)
-
-    iXcoord[iXcoord == 0] = 1
-    iYcoord[iYcoord == 0] = 1
-
-    x1frac = (iXcoord + 1.0) - Xcoord
-    x2frac = 1.0 - x1frac
-    y1frac = (iYcoord + 1.0) - Ycoord
-    y2frac = 1.0 - y1frac
-
-    x1y1 = x1frac * y1frac
-    x1y2 = x1frac * y2frac
-    x2y1 = x2frac * y1frac
-    x2y2 = x2frac * y2frac
-
-    CHp_m = np.zeros((row, row), dtype=np.float64)
-    for it in range(0, row - 2):
-        for jt in range(0, row - 2):
-            iy = int(iYcoord[it, jt]); ix = int(iXcoord[it, jt])
-            CHp_m[iy, ix]         += x1y1[it, jt] * CH_m[it, jt]
-            CHp_m[iy, ix + 1]     += x2y1[it, jt] * CH_m[it, jt]
-            CHp_m[iy + 1, ix]     += x1y2[it, jt] * CH_m[it, jt]
-            CHp_m[iy + 1, ix + 1] += x2y2[it, jt] * CH_m[it, jt]
-
-    return CHp_m
-
-def kreuzer3F(z: float,
-              field: np.ndarray,
-              wavelength: float,
-              pixel_pitch_in: float,
-              pixel_pitch_out: float,
-              L: float,
-              FC: np.ndarray) -> np.ndarray:
- 
-    h, w = field.shape
-    row = int(min(h, w))
-    y0 = (h - row) // 2
-    x0 = (w - row) // 2
-    CH_m = field[y0:y0 + row, x0:x0 + row].astype(np.float64, copy=False)
-
-    dx = float(pixel_pitch_in)
-    dX = float(pixel_pitch_out)
-    deltaY = dX
-
-    k = 2.0 * np.pi / float(wavelength)
-    W = dx * row
-
-    delta = np.linspace(1, row, num=row, dtype=np.float64)
-    X, Y = np.meshgrid(delta, delta)
-
-    xo = -W / 2.0
-    yo = -W / 2.0
-
-    xop = xo * L / np.sqrt(L**2 + xo**2)
-    yop = yo * L / np.sqrt(L**2 + yo**2)
-
-    deltaxp = xop / (-row / 2.0)
-    deltayp = deltaxp
-
-    Yo = -dX * row / 2.0
-    Xo = -dX * row / 2.0
-
-    Xp = (dx * (X - row / 2.0) * L /
-          np.sqrt(L**2 + (dx**2)*(X - row/2.0)**2 + (dx**2)*(Y - row/2.0)**2))
-    Yp = (dx * (Y - row / 2.0) * L /
-          np.sqrt(L**2 + (dx**2)*(X - row/2.0)**2 + (dx**2)*(Y - row/2.0)**2))
-
-    CHp_m = prepairholoF(CH_m, xop, yop, Xp, Yp)
-
-    Rp = np.sqrt(L**2 - (deltaxp*X + xop)**2 - (deltayp*Y + yop)**2)
-    r  = np.sqrt((dX**2)*((X - row/2.0)**2 + (Y - row/2.0)**2) + z**2)
-    CHp_m = CHp_m * ((L / Rp)**4) * np.exp(-0.5j * k * (r**2 - 2.0*z*L) * Rp / (L**2))
-
-    pad = int(row / 2)
-    FC_pad = np.pad(FC, (pad, pad))
-
-    T1 = CHp_m * np.exp((1j * k / (2.0 * L)) *
-                        (2.0*Xo*X*deltaxp + 2.0*Yo*Y*deltayp + X**2*deltaxp*dX + Y**2*deltayp*deltaY))
-    T1 = np.pad(T1, (pad, pad))
-    T1 = _fts(T1 * FC_pad)
-
-    T2 = np.exp(-1j * (k / (2.0 * L)) *
-                ((X - row/2.0)**2*deltaxp*dX + (Y - row/2.0)**2*deltayp*deltaY))
-    T2 = np.pad(T2, (pad, pad))
-    T2 = _fts(T2 * FC_pad)
-
-    K = _ifts(T2 * T1)
-    K = K[pad + 1:pad + row, pad + 1: pad + row]
-    return K
-
 
 def normalize(x: np.ndarray, scale: float) -> np.ndarray:
     '''Normalize every value of an array to the 0-scale interval.'''
@@ -237,6 +180,26 @@ def normalize(x: np.ndarray, scale: float) -> np.ndarray:
     max_val = np.max(x) if np.max(x)!=0 else 1
     normalized_image = scale*x / max_val
     return normalized_image
+
+# Function to propagate an optical field using the Angular Spectrum approach
+def propagate(field, z, wavelength, dx, dy, scale_factor):
+    field = np.array(field)
+    M, N = field.shape
+    x = np.arange(0, N, 1)  # array x
+    y = np.arange(0, M, 1)  # array y
+    X, Y = np.meshgrid(x - (N / 2), y - (M / 2), indexing='xy')
+    dfx = 1 / (dx * N)
+    dfy = 1 / (dy * M)
+    field_spec = np.fft.fftshift(field)
+    field_spec = np.fft.fft2(field_spec)
+    field_spec = np.fft.fftshift(field_spec)
+    kernel = np.power(1 / wavelength, 2) - (np.power(X * dfx, 2) + np.power(Y * dfy, 2)) + 0j
+    phase = np.exp(1j * z * scale_factor * 2 * np.pi * np.sqrt(kernel))
+    tmp = field_spec * phase
+    out = np.fft.ifftshift(tmp)
+    out = np.fft.ifft2(out)
+    out = np.fft.ifftshift(out)
+    return out
 
 def im2arr(path: str):
     '''Converts file image into numpy array.'''
@@ -250,25 +213,71 @@ def create_image(img: Image.Image, width, height):
     '''Converts image into type usable by customtkinter'''
     return CTkImage(light_image=img, dark_image=img, size=(width, height))
 
-def gamma_filter(arr, gamma):
-    return np.uint8(np.clip(arr + gamma * 255, 0, 255))
+def _to_float_image(arr: np.ndarray) -> np.ndarray:
+    return arr.astype(np.float64, copy=False) if arr.dtype != np.float64 else arr
 
-def contrast_filter(arr, contrast):
-    return np.uint8(np.clip(arr * contrast, 0, 255))
+def gamma_filter(arr: np.ndarray, gamma: float) -> np.ndarray:
+    x = _to_float_image(arr)
+    g = max(float(gamma), 1e-8)
+    y = np.power(x / (x.max() + 1e-9), 1.0 / g) * 255.0
+    return np.uint8(np.clip(y, 0, 255))
 
-def adaptative_eq_filter(arr, _):
-    arr = exposure.equalize_adapthist(normalize(arr, 1), clip_limit=DEFAULT_CLIP_LIMIT)
-    return np.uint8(arr * 255)  # Convertir de 0-1 a 0-255
+def contrast_filter(arr: np.ndarray, contrast: float) -> np.ndarray:
+    x = _to_float_image(arr)
+    c = float(contrast)
+    m = np.mean(x)
+    y = (x - m) * c + m
+    return np.uint8(np.clip(y, 0, 255))
 
-def highpass_filter(arr, freq):
-    arr = filters.butterworth(normalize(arr, 1), freq, high_pass=True)
-    return np.uint8(arr*255)
+def _ideal_mask(shape: tuple[int,int], cutoff: float, pass_type: str) -> np.ndarray:
+    rows, cols = shape
+    crow, ccol = rows // 2, cols // 2
+    radius = int(min(rows, cols) * float(cutoff) * 0.5)
+    radius = max(radius, 0)
+    Y, X = np.ogrid[:rows, :cols]
+    dist_sq = (X - ccol)**2 + (Y - crow)**2
+    if pass_type == 'high':
+        mask = np.ones((rows, cols), np.uint8)
+        if radius > 0:
+            mask[dist_sq <= radius**2] = 0
+    else:
+        mask = np.zeros((rows, cols), np.uint8)
+        if radius > 0:
+            mask[dist_sq <= radius**2] = 1
+    return mask
 
-def lowpass_filter(arr, freq):
-    arr = filters.butterworth(normalize(arr, 1), freq, high_pass=False)
-    return np.uint8(arr*255)
+def highpass_filter(arr: np.ndarray, cutoff: float) -> np.ndarray:
+    x = _to_float_image(arr)
+    f = np.fft.fft2(x)
+    fshift = np.fft.fftshift(f)
+    mask = _ideal_mask(x.shape, float(cutoff), pass_type='high')
+    fshift = fshift * mask
+    y = np.real(np.fft.ifft2(np.fft.ifftshift(fshift)))
+    return np.uint8(np.clip(y, 0, 255))
+
+def lowpass_filter(arr: np.ndarray, cutoff: float) -> np.ndarray:
+    x = _to_float_image(arr)
+    f = np.fft.fft2(x)
+    fshift = np.fft.fftshift(f)
+    mask = _ideal_mask(x.shape, float(cutoff), pass_type='low')
+    fshift = fshift * mask
+    y = np.real(np.fft.ifft2(np.fft.ifftshift(fshift)))
+    return np.uint8(np.clip(y, 0, 255))
+
+def adaptative_eq_filter(arr: np.ndarray, _unused_param) -> np.ndarray:
+    x = _to_float_image(arr)
+    arr_min, arr_max = x.min(), x.max()
+    rng = (arr_max - arr_min) + 1e-9
+    scaled = (x - arr_min) / rng
+    hist, bins = np.histogram(scaled.flatten(), 256, [0.0, 1.0])
+    cdf = hist.cumsum().astype(np.float64)
+    cdf /= (cdf[-1] + 1e-12)
+    eq = np.interp(scaled.flatten(), bins[:-1], cdf)
+    y = eq.reshape(x.shape) * (arr_max - arr_min) + arr_min
+    return np.uint8(np.clip(y, 0, 255))
 
 def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queue, Queue]]):
+    
     filter_dict =  {'gamma':gamma_filter,
                     'contrast':contrast_filter,
                     'adaptative_eq':adaptative_eq_filter,
@@ -287,7 +296,7 @@ def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queu
                    'size':None}
 
     # Initialize camera (0 by default most of the time means the integrated camera)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv.VideoCapture(0, cv.CAP_DSHOW)
 
     # Verify that the camera opened correctly
     if not cap.isOpened():
@@ -295,12 +304,12 @@ def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queu
         exit()
 
     # Sets the camera resolution to the closest chose in settings
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, MAX_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, MAX_HEIGHT)
+    cap.set(cv.CAP_PROP_FRAME_WIDTH, MAX_WIDTH)
+    cap.set(cv.CAP_PROP_FRAME_HEIGHT, MAX_HEIGHT)
 
     # Gets the actual resolution of the image
-    width_  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    height_ = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    width_  = cap.get(cv.CAP_PROP_FRAME_WIDTH)
+    height_ = cap.get(cv.CAP_PROP_FRAME_HEIGHT)
 
     print(f'Width: {width_}')
     print(f'Height: {height_}')
@@ -308,8 +317,8 @@ def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queu
     while True:
         init_time = time.time()
         # Captura la imagen de la cámara
-        img = cv2.cvtColor(cap.read()[1], cv2.COLOR_BGR2GRAY)
-        img = cv2.flip(img, 1)  # Voltea horizontalmente
+        img = cv.cvtColor(cap.read()[1], cv.COLOR_BGR2GRAY)
+        img = cv.flip(img, 1)  # Voltea horizontalmente
 
         filt_img = img
 
@@ -365,10 +374,10 @@ def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queu
             output_dict['size'] = (width_, height_)
 
             queue_manager['capture']['output'].put(output_dict)
-
+  
 def open_camera_settings(cap):
     try:
-        cap.set(cv2.CAP_PROP_SETTINGS, 0)
+        cap.set(cv.CAP_PROP_SETTINGS, 0)
     except:
         print('Cannot access camera settings.')
 
@@ -377,125 +386,65 @@ def _hash_array(arr: np.ndarray) -> str:
     return hashlib.sha1(arr.view(np.uint8)).hexdigest()
 
 @lru_cache(maxsize=16)
-def _precompute_kernel(shape: tuple[int, int],
-                       wavelength: float,
-                       dx: float, dy: float,
-                       scale: float) -> np.ndarray:
-    """Return the z-independent part of the ASM kernel."""
-    M, N = shape
-    x = np.arange(N) - N / 2
-    y = np.arange(M) - M / 2
-    X, Y = np.meshgrid(x, y, indexing="xy")
-    dfx = 1.0 / (dx * N)
-    dfy = 1.0 / (dy * M)
-    return 2 * np.pi * np.sqrt(
-        (1.0 / wavelength) ** 2 - (X * dfx) ** 2 - (Y * dfy) ** 2
-    ) * scale
- 
-
-def _propagate_cached(field_spec: np.ndarray,
-                      z: float,
-                      wavelength: float,
-                      dx: float, dy: float,
-                      scale: float) -> np.ndarray:
-    """
-    Identical maths to `propagate()` (the slow version) but re-uses
-    the *field_spec* and a cached kernel.  Absolutely no wrap-around
-    artefacts anymore.
-    """
-    kernel = _precompute_kernel(field_spec.shape,
-                                wavelength, dx, dy, scale)
-
-    phase = np.exp(1j * z * kernel)
-    tmp = field_spec * phase
-    tmp = np.fft.ifftshift(tmp)
-    out = np.fft.ifft2(tmp)
-    out = np.fft.ifftshift(out)
-    return out
-
 def _compute_spectrum(field: np.ndarray) -> np.ndarray:
     return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(field)))
+
 def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
-    """
-    Worker de reconstrucción:
-      • Mapea amplitud/intensidad con escala fija (sin min–max por frame).
-      • Para KR, devuelve **también** el campo complejo exacto (key "field")
-        para que la UI no lo re-sintetice desde u8.
-    """
     last_holo_hash = None
-    cached_spec = None
-    cached_ft = None
+    cached_spec    = None
+    cached_ft      = None
 
     while True:
         inp = queue_manager["reconstruction"]["input"].get()
 
-        # Entradas
-        holo_u8   = inp["image"].astype(np.float32)      # u8 ya restada referencia en la UI
-        algorithm = inp["algorithm"]                      # "AS" | "KR" | "DLHM"
-        L, Z, r   = inp["L"], inp["Z"], inp["r"]         # µm
-        wl, dxy   = inp["wavelength"], inp["dxy"]        # µm
-        scale     = inp.get("scale_factor", 1.0)
-        cosine_p  = inp.get("cosine_period", DEFAULT_COSINE_PERIOD)
-
-        t0 = time.time()
-
-        # Escala fija 0..1
-        holo01 = np.clip(holo_u8 / 255.0, 0.0, 1.0)
-
-        # Cache del espectro para ASM/KR
+        holo_u8   = inp["image"].astype(np.float64)
+        algorithm = inp["algorithm"]
+        L, Z, r   = inp["L"], inp["Z"], inp["r"]
+        wl, dxy   = inp["wavelength"], inp["dxy"]
+        scale     = inp["scale_factor"]
+        deltaX = Z * dxy / L
+        t0        = time.time()
         this_hash = _hash_array(holo_u8)
+        #print(wl,dxy,L,Z)
+
+        # ─── build & cache spectrum only when the hologram changes ───
         if this_hash != last_holo_hash:
-            field0 = np.sqrt(holo01)
-            cached_spec = _compute_spectrum(field0)
-
-            ft_cplx = _compute_spectrum(holo01)
-            ft_mag  = np.log1p(np.abs(ft_cplx))
-            cached_ft = (ft_mag / (ft_mag.max() + 1e-12) * 255.0).astype(np.uint8)
-
+            cached_spec = _compute_spectrum(holo_u8)          
+            ft_cplx     = _compute_spectrum(holo_u8)        
+            cached_ft   = normalize(np.log1p(np.abs(ft_cplx)), 255).astype(np.uint8)
             last_holo_hash = this_hash
+            M, N  = cached_spec.shape
 
-        # Selección de algoritmo
-        recon_field = None
-
+        # ─── pick algorithm ──────────────────────────────────────────
         if algorithm == "AS":
-            recon_c = _propagate_cached(cached_spec, r, wl, dxy, dxy, scale)
+            #print(r, wl, dxy, dxy, scale)
+            recon_c = propagate(holo_u8, r, wl, dxy, dxy, scale)
             amp_f   = np.abs(recon_c)
             phase_f = np.angle(recon_c)
-            recon_field = recon_c
 
         elif algorithm == "KR":
-            # Δx_out (Kreuzer) = Z * dxy / L
-            deltaX = Z * dxy / (L + 1e-12)
 
-            # Filtro cosenoidal cuadrado del tamaño de la imagen cuadrada
-            H, W = holo01.shape
-            s = int(min(H, W))
-            FC = filtcosenoF(cosine_p, s, 0)
+            s  = min(M, N)
+            y0 = (M - s) // 2
+            x0 = (N - s) // 2
+            holo_sq  = holo_u8[y0:y0 + s, x0:x0 + s] 
+            R0   = int(inp.get("cosine_period", 100))
+            FC  = filtcosenoF(R0, s, 0)
+            deltaX = Z * dxy / L   
+            #holo_sq_complex = holo_sq.astype(np.complex128)
+            #np.save("holo_sq_complex_Holo_sinrefe_interfaz.npy", holo_sq_complex)
+            Uz  = kreuzer3F(Z, holo_sq, wl, dxy, deltaX, L, FC)
+            amp_f   = np.abs(Uz)
+            phase_f = np.angle(Uz)
 
-            # Llamada con orden correcto: (z, field, λ, dx_in, dx_out, L, FC)
-            K = kreuzer3F(Z, holo01, wl, dxy, deltaX, L, FC)
+        else:  # DLHM
+            W_c    = dxy * holo_u8.shape[1]
+            amp_f, phase_f = dlhm_rec(holo_u8, L, Z, W_c, dxy, wl)
 
-            amp_f   = np.abs(K)
-            phase_f = np.angle(K)
-            recon_field = K
-
-        else:  # "DLHM"
-            W_c = dxy * holo_u8.shape[1]
-            amp_f, phase_f = dlhm_rec(holo01, L, Z, W_c, dxy, wl)
-            # Si quisieras: recon_field = amp_f * np.exp(1j*phase_f)
-
-        # Empaquetado 8-bit (sin min–max por frame)
-        a = amp_f.astype(np.float32)
-        p2, p98 = np.percentile(a, [2.0, 98.0])
-        den = max(p98 - p2, 1e-9)
-        a8  = np.clip((a - p2) / den, 0.0, 1.0)
-        amp_arr = (a8 * 255.0).astype(np.uint8)
-
-        i = (a8 * a8)
-        int_arr = (i / (i.max() + 1e-9) * 255.0).astype(np.uint8)
-
-        phase_wrapped = (phase_f + np.pi) % (2 * np.pi) - np.pi
-        phase_arr = ((phase_wrapped + np.pi) / (2 * np.pi) * 255.0).astype(np.uint8)
+        # ─── 8-bit views for the GUI ─────────────────────────────────
+        amp_arr   = normalize(amp_f,             255).astype(np.uint8)
+        int_arr   = normalize(amp_f ** 2,        255).astype(np.uint8)
+        phase_arr = normalize((phase_f + np.pi) % (2 * np.pi) - np.pi,255).astype(np.uint8)
 
         fps = 1.0 / (time.time() - t0 + 1e-12)
 
@@ -503,9 +452,9 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
             "amp":   amp_arr,
             "int":   int_arr,
             "phase": phase_arr,
-            "ft":    cached_ft,
+            "ft":    cached_ft,     
             "fps":   round(fps, 1),
-            "field": recon_field,   # <<--- CLAVE: la UI usará esto si existe
         }
         if not queue_manager["reconstruction"]["output"].full():
             queue_manager["reconstruction"]["output"].put(packet)
+
