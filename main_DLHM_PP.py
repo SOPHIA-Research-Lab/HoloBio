@@ -18,14 +18,11 @@ import functions_GUI as fGUI
 class App(ctk.CTk):
 
     DOWNSAMPLE_FACTOR = 1
-
     class _DummyEntry:
-        #removed “LateralMagnification” entry.
         def __init__(self, value: float):
             self._txt = str(value)          # stored as text – matches real CTkEntry.get()
         def get(self) -> str:               # tools_GUI calls .get().strip()
             return self._txt
-
     @staticmethod
     def _patched_apply_dimensions(app):
         # Always provide a fresh dummy entry with the *current* magnification
@@ -296,8 +293,6 @@ class App(ctk.CTk):
         self.filter_states_dim0 = []
         self.filter_states_dim1 = []
         self.filter_states_dim2 = []
-
-        # Last results of a speckle filter
         self.filtered_amp_array = None
         self.filtered_phase_array = None
 
@@ -364,7 +359,6 @@ class App(ctk.CTk):
         self.highpass_a = self.highpass_r
         self.lowpass_a = self.lowpass_r
 
-
     def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ImageTk.PhotoImage:
         """
         Resize with aspect ratio and paste on a black canvas of size
@@ -373,7 +367,6 @@ class App(ctk.CTk):
         """
         max_w, max_h = self.viewbox_width, self.viewbox_height
         orig_w, orig_h = pil_image.size
-
         # Compute fitted size
         if orig_w == 0 or orig_h == 0:
             new_w, new_h = max_w, max_h
@@ -385,14 +378,12 @@ class App(ctk.CTk):
             new_w = max(1, int(orig_w * scale))
             new_h = max(1, int(orig_h * scale))
             resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
         # Compose on black canvas to guarantee fixed output size
         canvas = Image.new("RGB", (max_w, max_h), color=(0, 0, 0))
         if resized.mode != "RGB":
             resized = resized.convert("RGB")
         offset = ((max_w - new_w) // 2, (max_h - new_h) // 2)
         canvas.paste(resized, offset)
-
         return ImageTk.PhotoImage(canvas)
     
     def init_all_frames(self) -> None:
@@ -440,23 +431,19 @@ class App(ctk.CTk):
         # Initialise the sliders/checkboxes for the very first image
         self.load_ui_from_filter_state(0, 0)
         self.update_image_filters()
-
         fGUI.init_speckles_frame(self)
-        
         fGUI.init_bio_analysis_frame(
             parent=self,
             apply_dimensions_callback=self.apply_dimensions,
             apply_qpi_callback=self.apply_QPI,
             update_qpi_placeholder_callback=self.update_qpi_placeholder,
             apply_microstructure_callback=self.apply_microstructure,
-            add_structure_quantification_callback=self.apply_microstructure
-        )
+            add_structure_quantification_callback=self.apply_microstructure)
  
     def on_filters_dimensions_change(self, *_):
 
         new_dim = self.filters_dimensions_var.get()
         prev_dim = getattr(self, "_last_filters_dimension", 0)
-
         # save state of the panel we are leaving
         if prev_dim == 0:
             self.store_filter_state(0, self.current_left_index)
@@ -464,10 +451,8 @@ class App(ctk.CTk):
             self.store_filter_state(1, self.current_amp_index)
         else:
             self.store_filter_state(2, self.current_phase_index)
-
         # Tell the rest of the GUI which side on
         self.filter_image_var.set("CA" if new_dim == 0 else "PR")
-
         # Restore saved widgets for the new dimension
         if new_dim == 0:
             self.load_ui_from_filter_state(0, self.current_left_index)
@@ -475,7 +460,6 @@ class App(ctk.CTk):
             self.load_ui_from_filter_state(1, self.current_amp_index)
         else:
             self.load_ui_from_filter_state(2, self.current_phase_index)
-
         self.update_image_filters()
         self._recompute_and_show(left=(new_dim == 0), right=(new_dim != 0))
         self._last_filters_dimension = new_dim
@@ -597,7 +581,6 @@ class App(ctk.CTk):
             self.captured_label.configure(image=self.img_c)
         if hasattr(self, "processed_label"):
             self.processed_label.configure(image=self.img_r)
-
 
     def _ensure_frame_lists_length(self) -> None:
         def _pad(lst, target_len):
@@ -1636,8 +1619,7 @@ class App(ctk.CTk):
 
             (self.lowpass_checkbox_var,
              self.manual_lowpass_c_var,   self.manual_lowpass_r_var,
-             self.lowpass_slider,         self.adjust_lowpass),
-        )
+             self.lowpass_slider,         self.adjust_lowpass),)
 
         for ui_chk, man_cap, man_proc, slider, handler in controls:
             manual_var = man_cap if left_side_selected else man_proc
@@ -1646,70 +1628,7 @@ class App(ctk.CTk):
             # If that filter is active, refresh its numeric value
             if manual_var.get() and slider is not None:
                 handler(slider.get())
-    """
-    def _update_recon_arrays(self,
-                             amp_arr:   np.ndarray | None = None,
-                             int_arr:   np.ndarray | None = None,
-                             phase_arr: np.ndarray | None = None):
- 
-        # 1 ▏fetch result from the worker  (unchanged)
-        if amp_arr is None or phase_arr is None:
-            if not hasattr(self, "recon_output"):
-                return
-            amp_arr   = self.recon_output.get("amp")
-            phase_arr = self.recon_output.get("phase")
-            int_arr   = self.recon_output.get("int")
-            field     = self.recon_output.get("field")
-        else:
-            field = None
-
-        if amp_arr is None or phase_arr is None:
-            return
-
-        # 2 ▏***NEW***  amplitude normalisation only
-        if self.ref_path:
-            a_f = amp_arr.astype(np.float32)
-            rng = a_f.max() - a_f.min()
-            if rng > 1e-9:
-                amp_arr = ((a_f - a_f.min()) / rng * 255.0).astype(np.uint8)
-
-        # 3 ▏store pristine copies  (original code, left untouched)
-        self.original_amplitude_arrays = [amp_arr.copy()]
-        self.original_phase_arrays     = [phase_arr.copy()]
-        self.amplitude_arrays          = [amp_arr.copy()]
-        self.phase_arrays              = [phase_arr.copy()]
-
-        if int_arr is not None:
-            self.original_intensity_arrays = [int_arr.copy()]
-            self.intensity_arrays          = [int_arr.copy()]
-
-        # 4 ▏complex field rebuild (unchanged)
-        if field is None:
-            amp_f   = amp_arr.astype(np.float32) / 255.0
-            phase_r = phase_arr.astype(np.float32) / 255.0 * 2 * np.pi
-            field   = amp_f * np.exp(1j * phase_r)
-        self.complex_fields = [field]
-
-        # 5 ▏re-apply saved filters / colour-maps (original logic)
-        self._ensure_filter_state_lists_length()
-
-        st_amp   = self.filter_states_dim1[0]
-        st_phase = self.filter_states_dim2[0]
-
-        if self._filters_enabled(st_amp):
-            self.amplitude_arrays[0] = self._apply_filters_from_state(
-                self.amplitude_arrays[0], st_amp)
-        if self._filters_enabled(st_phase):
-            self.phase_arrays[0] = self._apply_filters_from_state(
-                self.phase_arrays[0], st_phase)
-
-        self.amplitude_arrays[0] = self._apply_ui_colormap(
-            self.amplitude_arrays[0], self._active_cmap_amp)
-        self.phase_arrays[0] = self._apply_ui_colormap(
-            self.phase_arrays[0], self._active_cmap_phase)
-
-        self._apply_live_speckle_if_active()
-    """
+    
     def _update_recon_arrays(self,
                          amp_arr:   np.ndarray | None = None,
                          int_arr:   np.ndarray | None = None,

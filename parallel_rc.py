@@ -2,7 +2,6 @@ import numpy as np
 import time
 from customtkinter import CTkImage
 from multiprocessing import Queue
-#from kreuzer_functions import (kreuzer3F,filtcosenoF,dlhm_rec)
 from skimage import exposure, filters
 import cv2 as cv                          
 from settings import *
@@ -163,6 +162,7 @@ def kreuzer3F(z, field, wavelength, pixel_pitch_in, pixel_pitch_out, L, FC):
 
     return K
 
+
 def read(filename:str, path:str = '') -> np.ndarray:
     '''Reads image to double precision 2D array.'''
     if path!='':
@@ -182,7 +182,7 @@ def normalize(x: np.ndarray, scale: float) -> np.ndarray:
     return normalized_image
 
 # Function to propagate an optical field using the Angular Spectrum approach
-def propagate(field, z, wavelength, dx, dy, scale_factor):
+def propagate(field, z, wavelength, dx, dy, scale_factor=1):
     field = np.array(field)
     M, N = field.shape
     x = np.arange(0, N, 1)  # array x
@@ -220,14 +220,14 @@ def gamma_filter(arr: np.ndarray, gamma: float) -> np.ndarray:
     x = _to_float_image(arr)
     g = max(float(gamma), 1e-8)
     y = np.power(x / (x.max() + 1e-9), 1.0 / g) * 255.0
-    return np.uint8(np.clip(y, 0, 255))
+    return np.clip(y, 0, 255)
 
 def contrast_filter(arr: np.ndarray, contrast: float) -> np.ndarray:
     x = _to_float_image(arr)
     c = float(contrast)
     m = np.mean(x)
     y = (x - m) * c + m
-    return np.uint8(np.clip(y, 0, 255))
+    return np.clip(y, 0, 255)
 
 def _ideal_mask(shape: tuple[int,int], cutoff: float, pass_type: str) -> np.ndarray:
     rows, cols = shape
@@ -253,7 +253,7 @@ def highpass_filter(arr: np.ndarray, cutoff: float) -> np.ndarray:
     mask = _ideal_mask(x.shape, float(cutoff), pass_type='high')
     fshift = fshift * mask
     y = np.real(np.fft.ifft2(np.fft.ifftshift(fshift)))
-    return np.uint8(np.clip(y, 0, 255))
+    return np.clip(y, 0, 255)
 
 def lowpass_filter(arr: np.ndarray, cutoff: float) -> np.ndarray:
     x = _to_float_image(arr)
@@ -262,7 +262,7 @@ def lowpass_filter(arr: np.ndarray, cutoff: float) -> np.ndarray:
     mask = _ideal_mask(x.shape, float(cutoff), pass_type='low')
     fshift = fshift * mask
     y = np.real(np.fft.ifft2(np.fft.ifftshift(fshift)))
-    return np.uint8(np.clip(y, 0, 255))
+    return np.clip(y, 0, 255)
 
 def adaptative_eq_filter(arr: np.ndarray, _unused_param) -> np.ndarray:
     x = _to_float_image(arr)
@@ -274,7 +274,8 @@ def adaptative_eq_filter(arr: np.ndarray, _unused_param) -> np.ndarray:
     cdf /= (cdf[-1] + 1e-12)
     eq = np.interp(scaled.flatten(), bins[:-1], cdf)
     y = eq.reshape(x.shape) * (arr_max - arr_min) + arr_min
-    return np.uint8(np.clip(y, 0, 255))
+    return np.clip(y, 0, 255)
+
 
 def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queue, Queue]]):
     
@@ -300,7 +301,7 @@ def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queu
 
     # Verify that the camera opened correctly
     if not cap.isOpened():
-        print("No se puede abrir la cámara")
+        print("Is not posible to open the camara.")
         exit()
 
     # Sets the camera resolution to the closest chose in settings
@@ -386,8 +387,100 @@ def _hash_array(arr: np.ndarray) -> str:
     return hashlib.sha1(arr.view(np.uint8)).hexdigest()
 
 @lru_cache(maxsize=16)
+def _precompute_kernel(shape: tuple[int, int],wavelength: float,dx: float, dy: float,scale: float) -> np.ndarray:
+    M, N = shape
+    x = np.arange(N) - N / 2
+    y = np.arange(M) - M / 2
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    dfx = 1.0 / (dx * N)
+    dfy = 1.0 / (dy * M)
+    return 2 * np.pi * np.sqrt((1.0 / wavelength) ** 2 - (X * dfx) ** 2 - (Y * dfy) ** 2) * scale
+ 
+
+def _propagate_cached(field_spec: np.ndarray,z: float,wavelength: float,dx: float, dy: float,scale: float) -> np.ndarray:
+    kernel = _precompute_kernel(field_spec.shape,wavelength, dx, dy, scale)
+    phase  = np.exp(1j * z * kernel)           #   e^{j·z·2π·scale·√(...)}
+    tmp = field_spec * phase                   # ∘ multiply in the spectrum
+    tmp = np.fft.ifftshift(tmp)                # ∘ back to origin
+    out = np.fft.ifft2(tmp)                    # ∘ inverse FT
+    out = np.fft.ifftshift(out)                # ∘ re-centre
+    return out
+
 def _compute_spectrum(field: np.ndarray) -> np.ndarray:
     return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(field)))
+
+""" 
+def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
+    last_holo_hash = None
+    cached_spec    = None
+    cached_ft      = None
+
+    while True:
+        inp = queue_manager["reconstruction"]["input"].get()
+
+        holo_u8   = inp["image"].astype(np.float64)/255
+        algorithm = inp["algorithm"]
+        L, Z, r   = inp["L"], inp["Z"], inp["r"]
+        wl, dxy   = inp["wavelength"], inp["dxy"]
+        scale     = inp["scale_factor"]
+        deltaX = Z * dxy / L
+        t0        = time.time()
+        this_hash = _hash_array(holo_u8)
+        print(wl,dxy,L,Z,deltaX)
+
+        # ─── build & cache spectrum only when the hologram changes ───
+
+        if this_hash != last_holo_hash:
+            cached_spec = _compute_spectrum(holo_u8)          
+            ft_cplx     = _compute_spectrum(holo_u8)        
+            cached_ft   = normalize(np.log1p(np.abs(ft_cplx)), 255).astype(np.uint8)
+            last_holo_hash = this_hash
+            M, N  = cached_spec.shape
+
+        # ─── pick algorithm ──────────────────────────────────────────
+        if algorithm == "AS":
+            recon_c = _propagate_cached(cached_spec, Z - L, wl, dxy, dxy, scale)
+            amp_f   = np.abs(recon_c)
+            phase_f = np.angle(recon_c)
+
+        elif algorithm == "KR":
+
+            s  = min(M, N)
+            y0 = (M - s) // 2
+            x0 = (N - s) // 2
+            field_sq = cached_spec[y0:y0 + s, x0:x0 + s]
+            holo_sq  = holo_u8[y0:y0 + s, x0:x0 + s] 
+            R0   = int(inp.get("cosine_period", 100))
+            FC  = filtcosenoF(R0, s, 0)
+            deltaX = Z * dxy / L   
+            holo_sq_complex = holo_sq.astype(np.complex128)
+            np.save("holo_sq_complex_Holo_sinrefe_interfaz.npy", holo_sq_complex)
+            Uz  = kreuzer3F(Z, holo_sq, wl, dxy, deltaX, L, FC)
+            amp_f   = np.abs(Uz)
+            phase_f = np.angle(Uz)
+
+
+        else:  # DLHM
+            W_c    = dxy * holo_u8.shape[1]
+            amp_f, phase_f = dlhm_rec(holo_u8, L, Z, W_c, dxy, wl)
+
+        # ─── 8-bit views for the GUI ─────────────────────────────────
+        amp_arr   = normalize(amp_f,             255).astype(np.uint8)
+        int_arr   = normalize(amp_f ** 2,        255).astype(np.uint8)
+        phase_arr = normalize((phase_f + np.pi) % (2 * np.pi) - np.pi,255).astype(np.uint8)
+
+        fps = 1.0 / (time.time() - t0 + 1e-12)
+
+        packet = {
+            "amp":   amp_arr,
+            "int":   int_arr,
+            "phase": phase_arr,
+            "ft":    cached_ft,     
+            "fps":   round(fps, 1),
+        }
+        if not queue_manager["reconstruction"]["output"].full():
+            queue_manager["reconstruction"]["output"].put(packet)
+""" 
 
 def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
     last_holo_hash = None
@@ -408,6 +501,7 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
         #print(wl,dxy,L,Z)
 
         # ─── build & cache spectrum only when the hologram changes ───
+
         if this_hash != last_holo_hash:
             cached_spec = _compute_spectrum(holo_u8)          
             ft_cplx     = _compute_spectrum(holo_u8)        
@@ -417,16 +511,17 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
 
         # ─── pick algorithm ──────────────────────────────────────────
         if algorithm == "AS":
-            #print(r, wl, dxy, dxy, scale)
             recon_c = propagate(holo_u8, r, wl, dxy, dxy, scale)
             amp_f   = np.abs(recon_c)
             phase_f = np.angle(recon_c)
+
 
         elif algorithm == "KR":
 
             s  = min(M, N)
             y0 = (M - s) // 2
             x0 = (N - s) // 2
+            #field_sq = cached_spec[y0:y0 + s, x0:x0 + s]
             holo_sq  = holo_u8[y0:y0 + s, x0:x0 + s] 
             R0   = int(inp.get("cosine_period", 100))
             FC  = filtcosenoF(R0, s, 0)
@@ -436,6 +531,7 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
             Uz  = kreuzer3F(Z, holo_sq, wl, dxy, deltaX, L, FC)
             amp_f   = np.abs(Uz)
             phase_f = np.angle(Uz)
+
 
         else:  # DLHM
             W_c    = dxy * holo_u8.shape[1]
@@ -452,7 +548,7 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
             "amp":   amp_arr,
             "int":   int_arr,
             "phase": phase_arr,
-            "ft":    cached_ft,     
+            "ft":    cached_ft,      
             "fps":   round(fps, 1),
         }
         if not queue_manager["reconstruction"]["output"].full():
