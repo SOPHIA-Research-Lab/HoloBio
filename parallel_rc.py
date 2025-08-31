@@ -45,8 +45,10 @@ def dlhm_rec(hologram, L, z, W_c, dx_out, wavelength):
                          np.arange(-N / 2 * dfy, N / 2 * dfy, dfy))
 
     # Propagation kernel for the Angular Spectrum Method (ASM)
-    E = np.exp(1j * (L - z) * np.sqrt(k ** 2 - 4 * np.pi ** 2 * (fx ** 2 + fy ** 2)))
-
+    #E = np.exp(1j * (L - z) * np.sqrt(k ** 2 - 4 * np.pi ** 2 * (fx ** 2 + fy ** 2)))
+    arg = k ** 2 - 4 * np.pi ** 2 * (fx ** 2 + fy ** 2)
+    # for negative values, keep as complex instead of NaN
+    E = np.exp(1j * (L - z) * np.sqrt(arg.astype(np.complex128)))
     # Compute hologram using inverse Fourier transform
     Uz = ifts(fts(hologram) * E)
 
@@ -418,7 +420,7 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
     while True:
         inp = queue_manager["reconstruction"]["input"].get()
 
-        holo_u8   = inp["image"].astype(np.float64)/255
+        holo_u8   = inp["image"].astype(np.float64)
         algorithm = inp["algorithm"]
         L, Z, r   = inp["L"], inp["Z"], inp["r"]
         wl, dxy   = inp["wavelength"], inp["dxy"]
@@ -426,7 +428,7 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
         deltaX = Z * dxy / L
         t0        = time.time()
         this_hash = _hash_array(holo_u8)
-        print(wl,dxy,L,Z,deltaX)
+        #print(wl,dxy,L,Z,deltaX)
 
         # ─── build & cache spectrum only when the hologram changes ───
 
@@ -453,8 +455,8 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
             R0   = int(inp.get("cosine_period", 100))
             FC  = filtcosenoF(R0, s, 0)
             deltaX = Z * dxy / L   
-            holo_sq_complex = holo_sq.astype(np.complex128)
-            np.save("holo_sq_complex_Holo_sinrefe_interfaz.npy", holo_sq_complex)
+            #holo_sq_complex = holo_sq.astype(np.complex128)
+            #np.save("holo_sq_complex_Holo_sinrefe_interfaz.npy", holo_sq_complex)
             Uz  = kreuzer3F(Z, holo_sq, wl, dxy, deltaX, L, FC)
             amp_f   = np.abs(Uz)
             phase_f = np.angle(Uz)

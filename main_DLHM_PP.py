@@ -726,12 +726,21 @@ class App(ctk.CTk):
                             tk.StringVar(value="Amplitude")).get()
 
         if view_name.startswith("Phase"):
-            src = self.phase_arrays[self.current_phase_index]
+            if not self.phase_arrays:
+                return  
+            idx = min(self.current_phase_index, len(self.phase_arrays) - 1)
+            src = self.phase_arrays[idx]
         else:
             if amp_mode == "Amplitude":
-                src = self.amplitude_arrays[self.current_amp_index]
-            else:                            # “Intensities”
-                src = self.intensity_arrays[self.current_int_index]
+                if not self.amplitude_arrays:
+                    return
+                idx = min(self.current_amp_index, len(self.amplitude_arrays) - 1)
+                src = self.amplitude_arrays[idx]
+            else:  
+                if not self.intensity_arrays:
+                    return
+                idx = min(self.current_int_index, len(self.intensity_arrays) - 1)
+                src = self.intensity_arrays[idx]
 
         disp = self._run_filters_pipeline(src, use_left_side=False)
 
@@ -1460,19 +1469,27 @@ class App(ctk.CTk):
         dxy_eff = float(self.dxy)
         worker_u8 = base_u8.copy()
 
-        # Reference subtraction with symmetric encoding (no hard clipping)
+        # Reference subtraction  
         if getattr(self, "ref_path", ""):
             try:
                 ref_img = Image.open(self.ref_path).convert("L")
                 ref_u8  = np.asarray(ref_img)
                 if ref_u8.shape == base_u8.shape:
                     diff   = base_u8.astype(np.float64) - ref_u8.astype(np.float64)
+                    """
+                    max_val = float(np.max(diff))
+                    if max_val <= 0:
+                        max_val = 1.0
+                    # Mapear 0 → 0, max_val → 255
+                    worker_u8 = np.clip((diff / max_val) * 255.0, 0, 255).astype(np.uint8)
+                    """ 
                     maxabs = float(np.max(np.abs(diff)))
                     if maxabs > 0.0:
                         # Map signed [-maxabs, +maxabs] → [0,255] around 128
                         worker_u8 = np.clip(128.0 + 127.0 * (diff / maxabs), 0, 255).astype(np.uint8)
                 else:
                     print("Reference ignored → size mismatch")
+                    
             except Exception as exc:
                 print("Reference load failed →", exc)
 
@@ -1481,8 +1498,7 @@ class App(ctk.CTk):
             worker_u8 = cv.resize(
                 worker_u8,
                 (w // self.DOWNSAMPLE_FACTOR, h // self.DOWNSAMPLE_FACTOR),
-                interpolation=cv.INTER_AREA
-            )
+                interpolation=cv.INTER_AREA)
             dxy_eff = float(self.dxy) * float(self.DOWNSAMPLE_FACTOR)
 
         return worker_u8, dxy_eff
