@@ -254,7 +254,7 @@ def build_toolbar(app):
 
     # Save
     app.save_menu = ctk.CTkOptionMenu(
-        app.toolbar_frame, values=["Save FT", "Save Phase", "Save Amplitude"],
+        app.toolbar_frame, values=["Save Hologram", "Save FT", "Save Phase", "Save Amplitude"],
         command=app._on_save_select, width=100, corner_radius=5
     )
     app.save_menu.grid(row=0, column=2, padx=3, sticky="ew")

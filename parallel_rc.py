@@ -278,7 +278,6 @@ def adaptative_eq_filter(arr: np.ndarray, _unused_param) -> np.ndarray:
     y = eq.reshape(x.shape) * (arr_max - arr_min) + arr_min
     return np.clip(y, 0, 255)
 
-
 def capture(queue_manager:dict[dict[Queue, Queue], dict[Queue, Queue], dict[Queue, Queue]]):
     
     filter_dict =  {'gamma':gamma_filter,
@@ -398,7 +397,6 @@ def _precompute_kernel(shape: tuple[int, int],wavelength: float,dx: float, dy: f
     dfy = 1.0 / (dy * M)
     return 2 * np.pi * np.sqrt((1.0 / wavelength) ** 2 - (X * dfx) ** 2 - (Y * dfy) ** 2) * scale
  
-
 def _propagate_cached(field_spec: np.ndarray,z: float,wavelength: float,dx: float, dy: float,scale: float) -> np.ndarray:
     kernel = _precompute_kernel(field_spec.shape,wavelength, dx, dy, scale)
     phase  = np.exp(1j * z * kernel)           #   e^{j·z·2π·scale·√(...)}
@@ -534,7 +532,6 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
             amp_f   = np.abs(Uz)
             phase_f = np.angle(Uz)
 
-
         else:  # DLHM
             W_c    = dxy * holo_u8.shape[1]
             amp_f, phase_f = dlhm_rec(holo_u8, L, Z, W_c, dxy, wl)
@@ -556,3 +553,116 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
         if not queue_manager["reconstruction"]["output"].full():
             queue_manager["reconstruction"]["output"].put(packet)
 
+def reconstruct_pp(queue_manager: dict[str, dict[str, "Queue"]]) -> None:
+    """
+    Single-shot style worker for DLHM_PP.
+    - Coalesces queued inputs (keeps only the latest).
+    - Rebuilds the Fourier spectrum only when the hologram changes.
+    - Skips heavy recomputation if (holo_hash + params) signature is unchanged.
+    Emits 8-bit 'amp', 'int', 'phase', and cached log-FT as 'ft'.
+    """
+    last_holo_hash = None
+    last_param_sig = None
+
+    cached_spec = None
+    cached_ft   = None
+    last_result = None
+
+    M = N = None  # cached shape (used by KR)
+
+    while True:
+        # --- 1) Block for at least one input, then drain to keep only latest ---
+        inp = queue_manager["reconstruction"]["input"].get()
+        try:
+            while True:
+                # Keep replacing with the freshest packet if the UI spammed updates
+                inp = queue_manager["reconstruction"]["input"].get_nowait()
+        except Exception:
+            pass
+
+        t0 = time.time()
+
+        # --- 2) Extract inputs (keep names consistent with the existing RT worker) ---
+        # NOTE: image arrives as uint8 (or similar); cast to float64 for math kernels.
+        holo_u8   = inp["image"].astype(np.float64)
+        algorithm = inp.get("algorithm", "AS")
+
+        L  = float(inp.get("L", 0.0))
+        Z  = float(inp.get("Z", 0.0))
+        r  = float(inp.get("r", 0.0))
+        wl = float(inp.get("wavelength", 0.0))
+        dxy = float(inp.get("dxy", 0.0))
+
+        # App already computes this; keep the same name for kernels that expect it.
+        scale = float(inp.get("scale_factor", (L / (Z or 1e-9))))
+
+        # Optional extras (ignored by kernels here but kept for completeness)
+        R0 = int(inp.get("cosine_period", 100))
+
+        # --- 3) Cache & reuse spectrum only when the hologram actually changes ---
+        this_hash = _hash_array(holo_u8)
+        if this_hash != last_holo_hash:
+            cached_spec = _compute_spectrum(holo_u8)  # complex spectrum for internal use if needed
+            ft_cplx     = _compute_spectrum(holo_u8)
+            cached_ft   = normalize(np.log1p(np.abs(ft_cplx)), 255).astype(np.uint8)
+            last_holo_hash = this_hash
+            M, N = cached_spec.shape
+
+        # --- 4) Build a full parameter signature to skip redundant recomputes ---
+        param_sig = (last_holo_hash, algorithm, L, Z, r, wl, dxy, scale, R0)
+
+        if param_sig == last_param_sig and last_result is not None:
+            # Nothing changed since last successful reconstruction → just re-emit
+            if not queue_manager["reconstruction"]["output"].full():
+                queue_manager["reconstruction"]["output"].put(last_result)
+            continue
+
+        # --- 5) Run the selected reconstruction algorithm (heavy path) ---
+        if algorithm == "AS":
+            # Angular Spectrum
+            recon_c = propagate(holo_u8, r, wl, dxy, dxy, scale)
+            amp_f   = np.abs(recon_c)
+            phase_f = np.angle(recon_c)
+
+        elif algorithm == "KR":
+            # Kreuzer (crop to square, cosine filter in frequency)
+            # Use image crop; many pipelines prefer spatial crop before KR kernel
+            s  = int(min(M or holo_u8.shape[0], N or holo_u8.shape[1]))
+            y0 = (holo_u8.shape[0] - s) // 2
+            x0 = (holo_u8.shape[1] - s) // 2
+            holo_sq = holo_u8[y0:y0 + s, x0:x0 + s]
+
+            FC = filtcosenoF(R0, s, 0)
+            deltaX = Z * dxy / (L or 1e-12)
+
+            Uz = kreuzer3F(Z, holo_sq, wl, dxy, deltaX, L, FC)
+            amp_f   = np.abs(Uz)
+            phase_f = np.angle(Uz)
+
+        else:
+            # DLHM direct reconstruction
+            # W_c: camera width in micrometers (pitch * width)
+            W_c = dxy * holo_u8.shape[1]
+            amp_f, phase_f = dlhm_rec(holo_u8, L, Z, W_c, dxy, wl)
+
+        # --- 6) GUI-friendly 8-bit buffers ---
+        amp_arr   = normalize(amp_f,      255).astype(np.uint8)
+        int_arr   = normalize(amp_f**2,   255).astype(np.uint8)
+        phase_arr = normalize(((phase_f + np.pi) % (2 * np.pi)) - np.pi, 255).astype(np.uint8)
+
+        fps = 1.0 / (time.time() - t0 + 1e-12)
+
+        out_packet = {
+            "amp":   amp_arr,
+            "int":   int_arr,
+            "phase": phase_arr,
+            "ft":    cached_ft,
+            "fps":   round(fps, 1),
+        }
+
+        # --- 7) Publish & update caches ---
+        last_param_sig = param_sig
+        last_result    = out_packet
+
+        if not queue_manager["reconstruction"]["output"].full():
+            queue_manager["reconstruction"]["output"].put(out_packet)

@@ -13,11 +13,13 @@ import matplotlib.pyplot as plt
 from importlib import import_module, reload
 import tools_GUI as tGUI
 import functions_GUI as fGUI
+import hashlib
 
 
 class App(ctk.CTk):
 
     DOWNSAMPLE_FACTOR = 1
+    VIEWBOX_SIDE = 560
     class _DummyEntry:
         def __init__(self, value: float):
             self._txt = str(value)          # stored as text – matches real CTkEntry.get()
@@ -132,37 +134,23 @@ class App(ctk.CTk):
         self.max_w_fps = 0
         self.settings = False
 
-        warnings.filterwarnings("ignore",
-                                category=RuntimeWarning,
-                                module="skimage.filters._fft_based")
+        warnings.filterwarnings("ignore",category=RuntimeWarning,module="skimage.filters._fft_based")
 
         self.speckle_lock: bool = False
         self.speckle_k_last: int = 0
         self.speckle_applied: bool = False   
 
-        self.queue_manager = {
-            "capture": {
-                "input": Queue(1),
-                "output": Queue(1),
-            },
-            "reconstruction": {
-                "input": Queue(1),
-                "output": Queue(1),
-            },
-        }
+        self.queue_manager = { "capture": {"input": Queue(1),"output": Queue(1),},"reconstruction": {"input": Queue(1),"output": Queue(1),},}
 
-        # Start ONLY the reconstruction process, skip capture:
         self.reconstruction = Process(target=reconstruct, args=(self.queue_manager,))
         self.reconstruction.start()
 
         self.capture_input = {'path': None, 'reference path': None, 'settings': None, 'filters': None, 'filter': None}
         self.capture_output = {'image': None, 'filtered': None, 'fps': 0, 'size': (0, 0)}
-        self.recon_input = {'image': None, 'filters': None, 'filter': False, 'algorithm': None, 'L': 0, 'Z': 0, 'r': 0,
-                            'wavelength': 0, 'dxy': 0, 'scale_factor': 0, 'squared': False, 'Processed_Image': False}
+        self.recon_input = {'image': None, 'filters': None, 'filter': False, 'algorithm': None, 'L': 0, 'Z': 0, 'r': 0,'wavelength': 0, 'dxy': 0, 'scale_factor': 0, 'squared': False, 'Processed_Image': False}
         self.recon_output = {'image': None, 'filtered': None, 'fps': 0}
 
         self.speckle_checkbox_var = tk.BooleanVar(value=False)
-
         self.multi_holo_arrays: list[np.ndarray] = []
         self.hologram_frames:    list[ctk.CTkImage] = []
         self.current_left_index: int = 0
@@ -217,7 +205,7 @@ class App(ctk.CTk):
             self.capture_input['filter'] = True
 
         if process in ("reconstruction", ""):
-            self.recon_input = {                       # ← rebuild entirely
+            self.recon_input = {                      
                 "image":        self.arr_c,
                 "filters":      (self.filters_r, self.filter_params_r),
                 "filter":       True,
@@ -242,8 +230,7 @@ class App(ctk.CTk):
             ("load_menu",  "Load"),
             ("tools_menu", "Tools"),
             ("save_menu",  "Save"),
-            ("theme_menu", "Theme"),
-        ):
+            ("theme_menu", "Theme"),):
             m = getattr(self, attr, None)
             if m is not None:
                 m.set(caption)
@@ -311,11 +298,6 @@ class App(ctk.CTk):
         return table.get(ui_name, ui_name.lower())
 
     def _apply_ui_colormap(self, arr8u: np.ndarray, ui_name: str) -> np.ndarray:
-        """
-        Return *arr8u* converted to RGB with the UI-selected colormap.
-        If `ui_name` is “Original” or the array is already RGB, it is
-        returned unchanged.
-        """
         if ui_name == "Original" or arr8u.ndim == 3:
             return arr8u
         cmap = mpl_cmaps[self._map_ui_to_mpl_cmap(ui_name)]
@@ -324,27 +306,14 @@ class App(ctk.CTk):
         return rgb
 
     def _safe_apply_matplotlib_colormap(self,arr8u : np.ndarray,ui_name: str):
-        """
-        Drop-in replacement for the old helper.
-        Returns a PIL.Image – never crashes if the array is already RGB.
-        """
         rgb = self._apply_ui_colormap(arr8u, ui_name)
- 
         if rgb.ndim == 2:
             rgb = np.stack([rgb]*3, axis=-1)
-
         from PIL import Image
         return Image.fromarray(rgb.astype(np.uint8), mode="RGB")
 
     def _add_amplitude_filter_vars(self) -> None:
-        """
-        Tools-GUI expects a full set of “manual_*_a_var” flags and
-        numeric parameters for the *Amplitude* dimension (index 1).
-        They did not exist, which is why every access raised
-        AttributeError.  
-        We create them **and** keep them *wired* to the Phase ones
-        so both views (Amplitude / Phase) stay consistent.
-        """
+
         # Boolean flags – we simply alias them to the Phase (r) ones
         self.manual_gamma_a_var = self.manual_gamma_r_var
         self.manual_contrast_a_var = self.manual_contrast_r_var
@@ -360,11 +329,6 @@ class App(ctk.CTk):
         self.lowpass_a = self.lowpass_r
 
     def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ImageTk.PhotoImage:
-        """
-        Resize with aspect ratio and paste on a black canvas of size
-        (viewbox_width x viewbox_height) so the final widget image
-        is ALWAYS the same size, regardless of input.
-        """
         max_w, max_h = self.viewbox_width, self.viewbox_height
         orig_w, orig_h = pil_image.size
         # Compute fitted size
@@ -423,8 +387,7 @@ class App(ctk.CTk):
         # React whenever the user toggles between Holo / Amp / Phase
         self.filters_dimensions_var.trace_add(
             "write",
-            lambda *_: self.on_filters_dimensions_change()
-        )
+            lambda *_: self.on_filters_dimensions_change())
 
         # Keep track of the dimension we start in (Hologram = 0)
         self._last_filters_dimension = 0
@@ -439,7 +402,7 @@ class App(ctk.CTk):
             update_qpi_placeholder_callback=self.update_qpi_placeholder,
             apply_microstructure_callback=self.apply_microstructure,
             add_structure_quantification_callback=self.apply_microstructure)
- 
+
     def on_filters_dimensions_change(self, *_):
 
         new_dim = self.filters_dimensions_var.get()
@@ -473,14 +436,79 @@ class App(ctk.CTk):
                 return i
         return None
 
+    def _apply_live_speckle_if_active(self) -> None:
+        if not self.speckle_applied:
+            return
+        self._refresh_after_speckle()
+
+    def _apply_speckle_filter(self) -> None:
+
+        method = self._current_speckle_method()
+
+        # If no method selected → turn speckle OFF and restore original images
+        if method is None:
+            self.speckle_applied = False
+            self.filtered_amp_array = None
+            self.filtered_phase_array = None
+            # Also clear any stale backups on the next refresh
+            self._refresh_after_speckle()
+            return
+
+        # Indices currently shown on the right viewer
+        idx_amp = getattr(self, "current_amp_index", 0)
+        idx_phase = getattr(self, "current_phase_index", 0)
+
+        # Snapshot the pristine state to shield it from the tools call ---
+        amp_before   = None
+        phase_before = None
+        amp_frame_before   = None
+        phase_frame_before = None
+        field_before = None
+
+        if idx_amp < len(getattr(self, "amplitude_arrays", [])):
+            amp_before = self.amplitude_arrays[idx_amp].copy()
+            amp_frame_before = self.amplitude_frames[idx_amp] if idx_amp < len(self.amplitude_frames) else None
+
+        if idx_phase < len(getattr(self, "phase_arrays", [])):
+            phase_before = self.phase_arrays[idx_phase].copy()
+            phase_frame_before = self.phase_frames[idx_phase] if idx_phase < len(self.phase_frames) else None
+
+        if hasattr(self, "complex_fields") and self.complex_fields:
+            # We keep a single field per reconstruction set; use the first one
+            try:
+                field_before = self.complex_fields[0]
+            except Exception:
+                field_before = None
+
+        tGUI.apply_speckle_filter(self)
+
+        # Revert any side-effects the tools may have done in place ---
+        if amp_before is not None and idx_amp < len(self.amplitude_arrays):
+            self.amplitude_arrays[idx_amp] = amp_before
+        if phase_before is not None and idx_phase < len(self.phase_arrays):
+            self.phase_arrays[idx_phase] = phase_before
+        if amp_frame_before is not None and idx_amp < len(self.amplitude_frames):
+            self.amplitude_frames[idx_amp] = amp_frame_before
+        if phase_frame_before is not None and idx_phase < len(self.phase_frames):
+            self.phase_frames[idx_phase] = phase_frame_before
+        if field_before is not None and hasattr(self, "complex_fields") and self.complex_fields:
+            try:
+                self.complex_fields[0] = field_before
+            except Exception:
+                pass
+
+        # Mark speckle as active and commit via a safe, reversible swap ---
+        self.speckle_applied = True
+        self._refresh_after_speckle()
+
     def _refresh_after_speckle(self) -> None:
-        """Swap in/out filtered arrays and repaint the right viewer."""
+
         active = self.speckle_applied
         idx_amp = getattr(self, "current_amp_index",   0)
         idx_phase = getattr(self, "current_phase_index", 0)
 
-        # Amplitude
-        if active and self.filtered_amp_array is not None:
+        # Amplitude swap with automatic backup/restore
+        if active and getattr(self, "filtered_amp_array", None) is not None:
             if not hasattr(self, "_amp_backup"):
                 self._amp_backup = self.amplitude_arrays[idx_amp].copy()
             self.amplitude_arrays[idx_amp] = self.filtered_amp_array.copy()
@@ -488,8 +516,8 @@ class App(ctk.CTk):
             self.amplitude_arrays[idx_amp] = self._amp_backup
             delattr(self, "_amp_backup")
 
-        # Phase
-        if active and self.filtered_phase_array is not None:
+        # Phase swap with automatic backup/restore
+        if active and getattr(self, "filtered_phase_array", None) is not None:
             if not hasattr(self, "_phase_backup"):
                 self._phase_backup = self.phase_arrays[idx_phase].copy()
             self.phase_arrays[idx_phase] = self.filtered_phase_array.copy()
@@ -497,37 +525,18 @@ class App(ctk.CTk):
             self.phase_arrays[idx_phase] = self._phase_backup
             delattr(self, "_phase_backup")
 
-        # Regenerate CTkImages with the committed colour-maps
+        # Rebuild CTkImages using the active colour-maps and update the right viewer
         if idx_amp < len(self.amplitude_arrays):
-            pil = self._safe_apply_matplotlib_colormap(
+            pil_a = self._safe_apply_matplotlib_colormap(
                 self.amplitude_arrays[idx_amp], self._active_cmap_amp)
-            self.amplitude_frames[idx_amp] = self._preserve_aspect_ratio_right(pil)
+            self.amplitude_frames[idx_amp] = self._preserve_aspect_ratio_right(pil_a)
 
         if idx_phase < len(self.phase_arrays):
-            pil = self._safe_apply_matplotlib_colormap(
+            pil_p = self._safe_apply_matplotlib_colormap(
                 self.phase_arrays[idx_phase], self._active_cmap_phase)
-            self.phase_frames[idx_phase] = self._preserve_aspect_ratio_right(pil)
+            self.phase_frames[idx_phase] = self._preserve_aspect_ratio_right(pil_p)
 
         self.update_right_view()
-
-    def _apply_live_speckle_if_active(self) -> None:
-        if not self.speckle_applied:
-            return
-        self._refresh_after_speckle()
-
-    def _apply_speckle_filter(self) -> None:
-        """Called by the ‘Apply’ button in the Speckle pane."""
-        if self._current_speckle_method() is None:
-            self.speckle_applied = False
-            self.filtered_amp_array = None
-            self.filtered_phase_array = None
-            self._refresh_after_speckle()
-            return
-
-        # Run the heavy lifting ONCE
-        tGUI.apply_speckle_filter(self)
-        self.speckle_applied = True
-        self._refresh_after_speckle()
 
     def update_qpi_placeholder(self) -> None:
         """
@@ -552,35 +561,66 @@ class App(ctk.CTk):
         return ctk.CTkImage(light_image=ph,
                             size=(self.viewbox_width, self.viewbox_height))
 
+    def _lock_viewbox_geometry(self) -> None:
+        """
+        Freeze geometry so labels/frames don't autosize differently.
+        """
+        # Prevent parent frames from shrinking/growing
+        for attr in ("viewing_frame", "image_frame"):
+            fr = getattr(self, attr, None)
+            if fr is not None and hasattr(fr, "grid_propagate"):
+                fr.grid_propagate(False)
+
+        # Standardize label anchor/size behavior
+        for lbl_name in ("captured_label", "processed_label"):
+            lbl = getattr(self, lbl_name, None)
+            if lbl is not None:
+                try:
+                    lbl.configure(anchor="center")
+                except Exception:
+                    pass
+
     def init_viewing_frame(self) -> None:
         """
-        Assemble the UI, then force the two image labels to a fixed
-        viewbox size and seed them with black placeholders.
+        Build the viewing area and force BOTH viewers to start as perfect squares
+        with identical pixel dimensions (VIEWBOX_SIDE × VIEWBOX_SIDE).
         """
-        # LEFT strip and initial images
-        self.init_navigation_frame()
-        self.holo_views  = [("init", self.img_c)]
-        self.recon_views = [("init", self.img_r)]
+        # Force square viewboxes before any CTkImage is seeded
+        side = int(getattr(self, "VIEWBOX_SIDE", 560))
+        self.viewbox_width  = side
+        self.viewbox_height = side
 
-        # RIGHT column: toolbar + two viewers
+        # LEFT column (parameters etc.)
+        self.init_navigation_frame()
+
+        # Seed lists so other parts remain happy
+        self.holo_views  = [("init", getattr(self, "img_c", None))]
+        self.recon_views = [("init", getattr(self, "img_r", None))]
+
+        # RIGHT column: toolbar + two viewers (labels are created here)
         fGUI.build_toolbar(self)
         fGUI.build_two_views_panel(self)
 
-        # Enforce fixed label geometry (width/height) and seed images
+        # Make both labels strictly the same size
         if hasattr(self, "captured_label"):
-            self.captured_label.configure(width=self.viewbox_width,
-                                          height=self.viewbox_height)
+            self.captured_label.configure(width=side, height=side)
         if hasattr(self, "processed_label"):
-            self.processed_label.configure(width=self.viewbox_width,
-                                           height=self.viewbox_height)
+            self.processed_label.configure(width=side, height=side)
 
-        # Seed with guaranteed-size placeholders if nothing is loaded yet
-        self.img_c = self._placeholder_ctkimage()
+        # Freeze geometry 
+        self._lock_viewbox_geometry()
+
+        # Use square placeholders at startup
+        self.img_c = self._placeholder_ctkimage()  # builds with (viewbox_width, viewbox_height)
         self.img_r = self._placeholder_ctkimage()
+
         if hasattr(self, "captured_label"):
             self.captured_label.configure(image=self.img_c)
         if hasattr(self, "processed_label"):
             self.processed_label.configure(image=self.img_r)
+
+        # Keep the rest of your original startup pipeline
+        self._sync_canvas_and_frame_bg()
 
     def _ensure_frame_lists_length(self) -> None:
         def _pad(lst, target_len):
@@ -595,10 +635,10 @@ class App(ctk.CTk):
         _pad(self.intensity_frames,  len(self.intensity_arrays))
 
     def get_load_menu_values(self):
-        return ["Load image", "Select reference", "Reset reference"]
+        return ["Load Hologram", "Select reference", "Reset reference"]
 
     def _on_load_select(self, choice: str):
-        {"Load image":       self.selectfile,
+        {"Load Hologram":       self.selectfile,
          "Select reference": self.selectref,
          "Reset reference":  self.resetref}.get(choice, lambda: None)()
         self.after(100, self._reset_toolbar_labels)
@@ -625,19 +665,13 @@ class App(ctk.CTk):
         self._sync_canvas_and_frame_bg()
 
     def _is_log_scale_selected(self) -> bool:
-        """
-        Returns True only when the FT menu is on 'With logarithmic scale'.
-        Robust to minor wording variants; crucially, it does NOT match 'Without...'.
-        """
         v = (self.ft_mode_var.get() or "").strip().lower()
         return v in {
             "with logarithmic scale",
             "with log scale",
             "log",
-            "logarithmic",
-        }
+            "logarithmic"}
 
-     
     def _compute_ft(self, arr: np.ndarray) -> np.ndarray:
         """Returns magnitude FT (uint8) of *arr*, log-compressed if selected."""
         if arr is None or arr.size == 0:
@@ -651,7 +685,6 @@ class App(ctk.CTk):
 
         mag = mag / (mag.max() + 1e-12)
         return (mag * 255.0).astype(np.uint8)
-
 
     def update_left_view(self):
         """
@@ -673,11 +706,10 @@ class App(ctk.CTk):
         self.captured_label.configure(image=self.img_c)
         self.captured_title_label.configure(text=title)
 
-
     def _get_current_array(self, what: str) -> np.ndarray | None:
         """
         Return the numpy array corresponding to *what*:
-        'Hologram', 'FT', 'Phase', 'Amplitude', etc.
+        'Hologram', 'FT', 'Phase', 'Amplitude'
         """
         if what in ("Hologram", "Hologram "):
             return self.arr_c_view
@@ -712,18 +744,12 @@ class App(ctk.CTk):
         menu = tk.Menu(self, tearoff=0)
         opts = ["With logarithmic scale", "Without logarithmic scale"]
         for opt in opts:
-            menu.add_radiobutton(
-                label=opt, value=opt,
-                variable=self.ft_mode_var,
-                command=self._on_ft_mode_changed
-            )
-        menu.tk_popup(self.ft_mode_button.winfo_rootx(),
-                      self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
+            menu.add_radiobutton(label=opt, value=opt,variable=self.ft_mode_var,command=self._on_ft_mode_changed)
+        menu.tk_popup(self.ft_mode_button.winfo_rootx(), self.ft_mode_button.winfo_rooty() + self.ft_mode_button.winfo_height())
 
     def update_right_view(self):
         view_name = self.recon_view_var.get().strip()
-        amp_mode = getattr(self, "amp_mode_var",
-                            tk.StringVar(value="Amplitude")).get()
+        amp_mode = getattr(self, "amp_mode_var",tk.StringVar(value="Amplitude")).get()
 
         if view_name.startswith("Phase"):
             if not self.phase_arrays:
@@ -762,13 +788,8 @@ class App(ctk.CTk):
     def _show_amp_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
         for opt in ("Amplitude", "Intensities"):
-            menu.add_radiobutton(
-            label=opt, value=opt,
-            variable=self.amp_mode_var,
-            command=self._on_amp_mode_changed
-            )
-        menu.tk_popup(self.amp_mode_button.winfo_rootx(),
-                   self.amp_mode_button.winfo_rooty()+self.amp_mode_button.winfo_height())
+            menu.add_radiobutton(label=opt, value=opt,variable=self.amp_mode_var,command=self._on_amp_mode_changed)
+        menu.tk_popup(self.amp_mode_button.winfo_rootx(),self.amp_mode_button.winfo_rooty()+self.amp_mode_button.winfo_height())
  
     def _on_amp_mode_changed(self, *_):
         if self.recon_view_var.get().startswith("Amplitude"):
@@ -819,10 +840,8 @@ class App(ctk.CTk):
      
     def _place_holo_arrows(self) -> None:
         """Ensure arrows are gridded in row-4 if they were removed."""
-        self.left_arrow_holo.grid(row=4, column=0, sticky="w",
-                                  padx=20, pady=5)
-        self.right_arrow_holo.grid(row=4, column=1, sticky="e",
-                                   padx=20, pady=5)
+        self.left_arrow_holo.grid(row=4, column=0, sticky="w", padx=20, pady=5)
+        self.right_arrow_holo.grid(row=4, column=1, sticky="e",padx=20, pady=5)
 
     def show_holo_arrows(self) -> None:
         """Show the navigation arrows when >1 hologram is loaded."""
@@ -836,9 +855,7 @@ class App(ctk.CTk):
     def _activate_ft_coordinate_display(self) -> None:
         """Bind mouse-motion to the FT image and show the label."""
         self.captured_label.bind("<Motion>", self._on_ft_mouse_move)
-        self.captured_label.bind("<Leave>",
-                                 lambda e: self.ft_coord_label.configure(text=""))
-
+        self.captured_label.bind("<Leave>",lambda e: self.ft_coord_label.configure(text=""))
         # top-left corner of *left_frame* with a small margin
         self.ft_coord_label.place(relx=0.5, rely=1.0, x=0, y=-8, anchor="s")
 
@@ -854,13 +871,11 @@ class App(ctk.CTk):
                 delattr(self, "_last_ft_display")
             except Exception:
                 pass
-
         try:
             is_ft = isinstance(getattr(self, "holo_view_var", None), tk.StringVar) and \
                     self.holo_view_var.get() == "Fourier Transform"
         except Exception:
             is_ft = False
-
         if is_ft:
             self.update_left_view()
 
@@ -870,13 +885,7 @@ class App(ctk.CTk):
         # Make “Parameters” the default view on the left‑hand column
         self.change_menu_to("parameters")
 
-
-    def _make_unit_button(self,
-                          parent      : ctk.CTkFrame,
-                          row         : int,
-                          column      : int,
-                          unit_var    : tk.StringVar,
-                          label_target: ctk.CTkLabel) -> None:
+    def _make_unit_button(self, parent:ctk.CTkFrame, row:int, column:int, unit_var:tk.StringVar, label_target:ctk.CTkLabel) -> None:
 
         btn = ctk.CTkButton(parent, width=28, text="▼")
         btn.grid(row=row, column=column, sticky="e", padx=(0, 2))
@@ -884,15 +893,8 @@ class App(ctk.CTk):
         def _on_click(event=None):
             m = tk.Menu(self, tearoff=0, font=("Helvetica", 14))
             for u in ("nm", "µm", "mm", "cm"):
-                m.add_command(
-                    label=u,
-                    command=lambda unit=u: (
-                        unit_var.set(unit),
-                        self._set_unit_in_label(label_target, unit)
-                    )
-                )
-            m.post(btn.winfo_rootx(),
-                   btn.winfo_rooty() + btn.winfo_height())
+                m.add_command(label=u,command=lambda unit=u: (unit_var.set(unit),self._set_unit_in_label(label_target, unit)))
+            m.post(btn.winfo_rootx(),btn.winfo_rooty() + btn.winfo_height())
 
         btn.bind("<Button-1>", _on_click)
 
@@ -925,7 +927,7 @@ class App(ctk.CTk):
             "Micrometers": 1.0,
             "mm": 1e3,
             "cm": 1e4
-        }
+            }
         val = value.strip().replace(",", ".")
         if not val:
             return 0.0
@@ -947,28 +949,16 @@ class App(ctk.CTk):
         self._dist_unit_var  = tk.StringVar(value=self.distance_unit)
 
         # Wavelength and Pixel pitch
-        self._make_unit_button(self.variables_frame, row=0, column=0,
-                               unit_var=self._wave_unit_var,
-                               label_target=self.lambda_label)
-        self._make_unit_button(self.variables_frame, row=0, column=2,
-                               unit_var=self._pitch_unit_var,
-                               label_target=self.dxy_label)
+        self._make_unit_button(self.variables_frame, row=0, column=0,unit_var=self._wave_unit_var,label_target=self.lambda_label)
+        self._make_unit_button(self.variables_frame, row=0, column=2,unit_var=self._pitch_unit_var,label_target=self.dxy_label)
 
-        self._make_unit_button(self.L_frame, row=0, column=3,
-                               unit_var=self._dist_unit_var,
-                               label_target=self.L_slider_title)
+        self._make_unit_button(self.L_frame, row=0, column=3,unit_var=self._dist_unit_var,label_target=self.L_slider_title)
 
     def _init_colormap_settings(self):
         """Centralise all colour-map related state."""
-        self.available_colormaps = [
-            "Original", "Viridis", "Plasma", "Inferno",
-            "Magma", "Cividis", "Hot", "Cool", "Wistia"
-        ]
-        # user-facing (pending) choice
+        self.available_colormaps = ["Original", "Viridis", "Plasma", "Inferno", "Magma", "Cividis", "Hot", "Cool", "Wistia"]
         self.colormap_amp_var = tk.StringVar(self, value="Original")
         self.colormap_phase_var = tk.StringVar(self, value="Original")
-
-        # NEW → committed colormaps; images are rendered with these
         self._active_cmap_amp = "Original"
         self._active_cmap_phase = "Original"
 
@@ -977,11 +967,7 @@ class App(ctk.CTk):
             self.filters_choice_menu.grid_forget()
             return
         self.filters_choice_menu = ctk.CTkOptionMenu(
-        self.options_frame,
-        values=["Filters", "Bio-Analysis"],
-        command=self.choose_filters_menu,
-        width=270
-        )
+        self.options_frame,values=["Filters", "Bio-Analysis"],command=self.choose_filters_menu,width=270)
         self.filters_choice_menu.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
     def choose_filters_menu(self, selection: str) -> None:
@@ -993,12 +979,7 @@ class App(ctk.CTk):
         if hasattr(self, 'load_options_menu') and self.load_options_menu.winfo_ismapped():
             self.load_options_menu.grid_forget()
             return
-        self.load_options_menu = ctk.CTkOptionMenu(
-            self.options_frame,
-            values=["Load image","Select reference", "Reset reference"],
-            command=self.choose_load_option,
-            width=270
-        )
+        self.load_options_menu = ctk.CTkOptionMenu(self.options_frame,values=["Load image","Select reference", "Reset reference"],command=self.choose_load_option,width=270)
         # place it in the same row to the right of the Load button
         self.load_options_menu.grid(row=0, column=0, padx=5, pady=5,sticky='ew')
 
@@ -1016,12 +997,7 @@ class App(ctk.CTk):
         if hasattr(self, 'save_options_menu') and self.save_options_menu.winfo_ismapped():
             self.save_options_menu.grid_forget()
             return
-        self.save_options_menu = ctk.CTkOptionMenu(
-            self.options_frame,
-            values=["Save capture", "Save reconstruction"],
-            command=self.choose_save_option,
-            width=270
-        )
+        self.save_options_menu = ctk.CTkOptionMenu(self.options_frame,values=["Save capture", "Save reconstruction"],command=self.choose_save_option,width=270)
         self.save_options_menu.grid(row=0, column=2, padx=5, pady=5,sticky='ew')
 
     def choose_save_option(self, selected_option):
@@ -1044,12 +1020,6 @@ class App(ctk.CTk):
           self.options_frame.grid()
 
     def init_navigation_frame(self) -> None:
-        """
-        Re-creates the Parameters column using the modular helper
-        `fGUI.create_param_with_arrow()` for wavelength + pitch X/Y, y
-        mueve la línea de Magnification y el selector de unidad ▼ al header de ‘L’
-        exactamente como se pidió.
-        """
         # Container, canvas & scroll-bar
         self.navigation_frame = ctk.CTkFrame(self, corner_radius=8, width=MENU_FRAME_WIDTH)
         self.navigation_frame.grid(row=0, column=0, padx=5, sticky="nsew")
@@ -1075,17 +1045,11 @@ class App(ctk.CTk):
         self.parameters_inner_frame = ctk.CTkFrame(self.param_canvas)
         self.param_canvas.create_window((0, 0), window=self.parameters_inner_frame, anchor="nw")
 
-        title_lbl = ctk.CTkLabel(self.parameters_inner_frame,
-                                 text="Parameters",
-                                 font=ctk.CTkFont(size=15, weight="bold"))
+        title_lbl = ctk.CTkLabel(self.parameters_inner_frame,text="Parameters",font=ctk.CTkFont(size=15, weight="bold"))
         title_lbl.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
 
         #  Three parameters header
-        self.variables_frame = ctk.CTkFrame(
-            self.parameters_inner_frame,
-            width=PARAMETER_FRAME_WIDTH,
-            height=PARAMETER_FRAME_HEIGHT
-        )
+        self.variables_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH,height=PARAMETER_FRAME_HEIGHT)
         self.variables_frame.grid(row=1, column=0, sticky="ew", pady=2)
         self.variables_frame.grid_propagate(False)
 
@@ -1102,8 +1066,7 @@ class App(ctk.CTk):
             unit_list=units,
             entry_name_dict=self.param_entries,
             entry_key="wavelength",
-            unit_update_callback=self._set_unit_in_label
-        )
+            unit_update_callback=self._set_unit_in_label)
 
         fGUI.create_param_with_arrow(
             parent=self.variables_frame, row=0, col=1,
@@ -1111,8 +1074,7 @@ class App(ctk.CTk):
             unit_list=units,
             entry_name_dict=self.param_entries,
             entry_key="pitch_x",
-            unit_update_callback=self._set_unit_in_label
-        )
+            unit_update_callback=self._set_unit_in_label)
 
         fGUI.create_param_with_arrow(
             parent=self.variables_frame, row=0, col=2,
@@ -1120,8 +1082,7 @@ class App(ctk.CTk):
             unit_list=units,
             entry_name_dict=self.param_entries,
             entry_key="pitch_y",
-            unit_update_callback=self._set_unit_in_label
-        )
+            unit_update_callback=self._set_unit_in_label)
 
         # keep handy references
         self.wave_entry   = self.param_entries["wavelength"]
@@ -1129,11 +1090,7 @@ class App(ctk.CTk):
         self.pitchy_entry = self.param_entries["pitch_y"]
 
         # L-FRAME
-        self.L_frame = ctk.CTkFrame(
-            self.parameters_inner_frame,
-            width=PARAMETER_FRAME_WIDTH,
-            height=PARAMETER_FRAME_HEIGHT
-        )
+        self.L_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH,height=PARAMETER_FRAME_HEIGHT)
         self.L_frame.grid(row=3, column=0, sticky="ew", pady=2)
         self.L_frame.grid_propagate(False)
 
@@ -1147,26 +1104,19 @@ class App(ctk.CTk):
         self.L_slider_title = ctk.CTkLabel(
             self.L_frame,
             text=f"Distance between camera and source L "
-                 f"({self.distance_unit}): {round(self.L, 4)}"
-        )
+                 f"({self.distance_unit}): {round(self.L, 4)}")
         self.L_slider_title.grid(row=1, column=0, columnspan=3, sticky="ew")
         self.L_slider = ctk.CTkSlider(
-            self.L_frame, height=SLIDER_HEIGHT, corner_radius=8,
-            from_=self.MIN_L, to=self.MAX_L, command=self.update_L
-        )
+            self.L_frame, height=SLIDER_HEIGHT, corner_radius=8,from_=self.MIN_L, to=self.MAX_L, command=self.update_L)
         self.L_slider.grid(row=2, column=0, sticky="ew")
         self.L_slider.set(round(self.L, 4))
 
         self.L_slider_entry = ctk.CTkEntry(
-            self.L_frame, width=PARAMETER_ENTRY_WIDTH,
-            placeholder_text=f"{round(self.L, 4)}"
-        )
+            self.L_frame, width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.L, 4)}")
         self.L_slider_entry.grid(row=2, column=1, sticky="ew", padx=5)
 
         self.L_slider_button = ctk.CTkButton(
-            self.L_frame, width=PARAMETER_BUTTON_WIDTH,
-            text="Set", command=self.set_value_L
-        )
+            self.L_frame, width=PARAMETER_BUTTON_WIDTH,text="Set", command=self.set_value_L)
         self.L_slider_button.grid(row=2, column=2, sticky="ew", padx=10)
 
         start_row = 3
@@ -1182,13 +1132,8 @@ class App(ctk.CTk):
         self.viewing_frame.grid_columnconfigure(0, weight=1)
 
     def _build_Z_r_and_remaining_frames(self, first_row: int):
-        self.adit_options_frame = ctk.CTkFrame(
-            self.parameters_inner_frame,
-            width=PARAMETER_FRAME_WIDTH,
-            height=PARAMETER_FRAME_HEIGHT
-        )
-        self.adit_options_frame.grid(row=2, column=0,
-                                     sticky="ew", pady=2)
+        self.adit_options_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH,height=PARAMETER_FRAME_HEIGHT)
+        self.adit_options_frame.grid(row=2, column=0,sticky="ew", pady=2)
         self.adit_options_frame.grid_propagate(False)
 
         for c in range(5):
@@ -1201,46 +1146,29 @@ class App(ctk.CTk):
             self.magnification_label.grid_forget()
         self.magnification_label = ctk.CTkLabel(
             self.adit_options_frame,
-            text=f"Magnification: {round(self.scale_factor,4)}"
-        )
-        self.magnification_label.grid(row=0, column=0, columnspan=5,
-                                      sticky="nsew", pady=(4, 2))
+            text=f"Magnification: {round(self.scale_factor,4)}")
+        self.magnification_label.grid(row=0, column=0, columnspan=5,sticky="nsew", pady=(4, 2))
 
         if hasattr(self, "fix_r_checkbox") and self.fix_r_checkbox.winfo_exists():
             self.fix_r_checkbox.grid_forget()
         self.fix_r_checkbox = ctk.CTkCheckBox(
             self.adit_options_frame,
             text="Fix r",
-            variable=self.fix_r
-        )
-        self.fix_r_checkbox.grid(row=1, column=1, sticky="w",
-                                 padx=10, pady=5)
+            variable=self.fix_r)
+        self.fix_r_checkbox.grid(row=1, column=1, sticky="w",padx=10, pady=5)
 
         if hasattr(self, "dist_label") and self.dist_label.winfo_exists():
             self.dist_label.grid_forget()
         self.dist_label = ctk.CTkLabel(
             self.adit_options_frame,
-            text=f"Distances ({self.distance_unit})"
-        )
-        self.dist_label.grid(
-            row=1, column=2,
-            sticky="w",
-            padx=(2, 0),
-            pady=5
-        )
+            text=f"Distances ({self.distance_unit})")
+        self.dist_label.grid(row=1, column=2,sticky="w",padx=(2, 0),pady=5)
 
         if hasattr(self, "dist_unit_btn") and self.dist_unit_btn.winfo_exists():
             self.dist_unit_btn.grid_forget()
-        self._make_unit_button(
-            parent=self.adit_options_frame,
-            row=1, column=3,
-            unit_var=self._dist_unit_var,
-            label_target=self.dist_label
-        )
+        self._make_unit_button(parent=self.adit_options_frame,row=1, column=3,unit_var=self._dist_unit_var,label_target=self.dist_label)
 
-        self.Z_frame = ctk.CTkFrame(self.parameters_inner_frame,
-                                    width=PARAMETER_FRAME_WIDTH,
-                                    height=PARAMETER_FRAME_HEIGHT)
+        self.Z_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH,height=PARAMETER_FRAME_HEIGHT)
         self.Z_frame.grid(row=first_row+1, column=0, sticky="ew", pady=2)
         self.Z_frame.grid_propagate(False)
         self.Z_frame.columnconfigure(0, weight=2)
@@ -1248,34 +1176,22 @@ class App(ctk.CTk):
         self.Z_slider_title = ctk.CTkLabel(
             self.Z_frame,
             text=f"Distance between the sample and source Z "
-                 f"({self.distance_unit}): {round(self.Z, 4)}"
-        )
-        self.Z_slider_title.grid(row=0, column=0, columnspan=3,
-                                 sticky="ew", pady=5)
+                 f"({self.distance_unit}): {round(self.Z, 4)}")
+        self.Z_slider_title.grid(row=0, column=0, columnspan=3,sticky="ew", pady=5)
 
-        self.Z_slider = ctk.CTkSlider(self.Z_frame, height=SLIDER_HEIGHT,
-                                      corner_radius=8,
-                                      from_=self.MIN_Z, to=self.MAX_Z,
-                                      command=self.update_Z)
+        self.Z_slider = ctk.CTkSlider(self.Z_frame, height=SLIDER_HEIGHT,corner_radius=8,from_=self.MIN_Z, to=self.MAX_Z,command=self.update_Z)
         self.Z_slider.grid(row=1, column=0, sticky="ew")
         self.Z_slider.set(round(self.Z, 4))
 
-        self.Z_slider_entry = ctk.CTkEntry(self.Z_frame,
-                                           width=PARAMETER_ENTRY_WIDTH,
-                                           placeholder_text=f"{round(self.Z, 4)}")
+        self.Z_slider_entry = ctk.CTkEntry(self.Z_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.Z, 4)}")
         self.Z_slider_entry.grid(row=1, column=1, sticky="ew", padx=5)
         self.Z_slider_entry.setvar(value=f"{round(self.Z, 4)}")
 
-        self.Z_slider_button = ctk.CTkButton(self.Z_frame,
-                                             width=PARAMETER_BUTTON_WIDTH,
-                                             text="Set",
-                                             command=self.set_value_Z)
+        self.Z_slider_button = ctk.CTkButton(self.Z_frame,width=PARAMETER_BUTTON_WIDTH,text="Set",command=self.set_value_Z)
         self.Z_slider_button.grid(row=1, column=2, sticky="ew", padx=10)
 
         # r-frame
-        self.r_frame = ctk.CTkFrame(self.parameters_inner_frame,
-                                    width=PARAMETER_FRAME_WIDTH,
-                                    height=PARAMETER_FRAME_HEIGHT)
+        self.r_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH,height=PARAMETER_FRAME_HEIGHT)
         self.r_frame.grid(row=first_row+2, column=0, sticky="ew", pady=2)
         self.r_frame.grid_propagate(False)
         self.r_frame.columnconfigure(0, weight=2)
@@ -1283,33 +1199,21 @@ class App(ctk.CTk):
         self.r_slider_title = ctk.CTkLabel(
             self.r_frame,
             text=f"Reconstruction distance r "
-                 f"({self.distance_unit}): {round(self.r, 4)}"
-        )
-        self.r_slider_title.grid(row=0, column=0, columnspan=3,
-                                 sticky="ew", pady=5)
+                 f"({self.distance_unit}): {round(self.r, 4)}")
+        self.r_slider_title.grid(row=0, column=0, columnspan=3,sticky="ew", pady=5)
 
-        self.r_slider = ctk.CTkSlider(self.r_frame, height=SLIDER_HEIGHT,
-                                      corner_radius=8,
-                                      from_=self.MIN_R, to=self.MAX_R,
-                                      command=self.update_r)
+        self.r_slider = ctk.CTkSlider(self.r_frame, height=SLIDER_HEIGHT,corner_radius=8,from_=self.MIN_R, to=self.MAX_R,command=self.update_r)
         self.r_slider.grid(row=1, column=0, sticky="ew")
         self.r_slider.set(round(self.r, 4))
 
-        self.r_slider_entry = ctk.CTkEntry(self.r_frame,
-                                           width=PARAMETER_ENTRY_WIDTH,
-                                           placeholder_text=f"{round(self.r, 4)}")
+        self.r_slider_entry = ctk.CTkEntry(self.r_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.r, 4)}")
         self.r_slider_entry.grid(row=1, column=1, sticky="ew", padx=5)
         self.r_slider_entry.setvar(value=f"{round(self.r, 4)}")
 
-        self.r_slider_button = ctk.CTkButton(self.r_frame,
-                                             width=PARAMETER_BUTTON_WIDTH,
-                                             text="Set",
-                                             command=self.set_value_r)
+        self.r_slider_button = ctk.CTkButton(self.r_frame,width=PARAMETER_BUTTON_WIDTH,text="Set",command=self.set_value_r)
         self.r_slider_button.grid(row=1, column=2, sticky="ew", padx=10)
 
-        self.algorithm_frame = ctk.CTkFrame(self.parameters_inner_frame,
-                                            width=PARAMETER_FRAME_WIDTH,
-                                            height=PARAMETER_FRAME_HEIGHT)
+        self.algorithm_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH,height=PARAMETER_FRAME_HEIGHT)
         self.algorithm_frame.grid(row=first_row+3, column=0, sticky="ew", pady=2)
         self.algorithm_frame.grid_propagate(False)
 
@@ -1318,109 +1222,69 @@ class App(ctk.CTk):
                 idx, weight=(1 if idx in (0, 3) else 0))
 
         self.algorithm_title = ctk.CTkLabel(self.algorithm_frame, text="Algorithm")
-        self.algorithm_title.grid(row=0, column=1, columnspan=2,
-                                  sticky="w", pady=5)
+        self.algorithm_title.grid(row=0, column=1, columnspan=2,sticky="w", pady=5)
 
-        self.as_algorithm_radio = ctk.CTkRadioButton(
-            self.algorithm_frame, text="Angular Spectrum",
-            variable=self.algorithm_var, value="AS")
-        self.as_algorithm_radio.grid(row=1, column=0, sticky="w",
-                                     padx=5, pady=5)
+        self.as_algorithm_radio = ctk.CTkRadioButton(self.algorithm_frame, text="Angular Spectrum",variable=self.algorithm_var, value="AS")
+        self.as_algorithm_radio.grid(row=1, column=0, sticky="w",padx=5, pady=5)
 
-        self.kr_algorithm_radio = ctk.CTkRadioButton(
-            self.algorithm_frame, text="Kreuzer Method",
-            variable=self.algorithm_var, value="KR")
-        self.kr_algorithm_radio.grid(row=1, column=1, sticky="w",
-                                     padx=5, pady=5)
+        self.kr_algorithm_radio = ctk.CTkRadioButton(self.algorithm_frame, text="Kreuzer Method",variable=self.algorithm_var, value="KR")
+        self.kr_algorithm_radio.grid(row=1, column=1, sticky="w",padx=5, pady=5)
 
-        self.dl_algorithm_radio = ctk.CTkRadioButton(
-            self.algorithm_frame, text="DLHM",
-            variable=self.algorithm_var, value="DL")
-        self.dl_algorithm_radio.grid(row=1, column=2, sticky="w",
-                                     padx=5, pady=5)       
+        self.dl_algorithm_radio = ctk.CTkRadioButton(self.algorithm_frame, text="DLHM",variable=self.algorithm_var, value="DL")
+        self.dl_algorithm_radio.grid(row=1, column=2, sticky="w",padx=5, pady=5)       
 
         # limits_frame
-        self.limits_frame = ctk.CTkFrame(self.parameters_inner_frame,
-                                         width=PARAMETER_FRAME_WIDTH,
-                                         height=PARAMETER_FRAME_HEIGHT + LIMITS_FRAME_EXTRA_SPACE)
+        self.limits_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH,height=PARAMETER_FRAME_HEIGHT + LIMITS_FRAME_EXTRA_SPACE)
         self.limits_frame.grid(row=first_row+4, column=0, sticky="ew", pady=2)
         self.limits_frame.grid_propagate(False)
 
         for idx in range(5):
-            self.limits_frame.columnconfigure(
-                idx, weight=(1 if idx in (0, 4) else 0))
+            self.limits_frame.columnconfigure(idx, weight=(1 if idx in (0, 4) else 0))
         for idx in range(4):
-            self.limits_frame.rowconfigure(
-                idx, weight=(1 if idx in (0, 3) else 0))
+            self.limits_frame.rowconfigure(idx, weight=(1 if idx in (0, 3) else 0))
 
         self.limit_min_label = ctk.CTkLabel(self.limits_frame, text="Minimum")
         self.limit_min_label.grid(row=1, column=0, sticky="ew", padx=5)
         self.limit_max_label = ctk.CTkLabel(self.limits_frame, text="Maximum")
         self.limit_max_label.grid(row=2, column=0, sticky="ew", padx=5)
 
-        self.limit_L_label = ctk.CTkLabel(self.limits_frame,
-                                          text=f"L")
+        self.limit_L_label = ctk.CTkLabel(self.limits_frame,text=f"L")
         self.limit_L_label.grid(row=0, column=1, sticky="ew", padx=5)
-        self.limit_Z_label = ctk.CTkLabel(self.limits_frame,
-                                          text=f"Z")
+        self.limit_Z_label = ctk.CTkLabel(self.limits_frame,text=f"Z")
         self.limit_Z_label.grid(row=0, column=2, sticky="ew", padx=5)
-        self.limit_R_label = ctk.CTkLabel(self.limits_frame,
-                                          text=f"r")
+        self.limit_R_label = ctk.CTkLabel(self.limits_frame,text=f"r")
         self.limit_R_label.grid(row=0, column=3, sticky="ew", padx=5)
 
-        self.limit_min_L_entry = ctk.CTkEntry(self.limits_frame,
-                                              width=PARAMETER_ENTRY_WIDTH,
-                                              placeholder_text=f"{round(self.MIN_L, 4)}")
+        self.limit_min_L_entry = ctk.CTkEntry(self.limits_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.MIN_L, 4)}")
         self.limit_min_L_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
-        self.limit_max_L_entry = ctk.CTkEntry(self.limits_frame,
-                                              width=PARAMETER_ENTRY_WIDTH,
-                                              placeholder_text=f"{round(self.MAX_L, 4)}")
+        self.limit_max_L_entry = ctk.CTkEntry(self.limits_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.MAX_L, 4)}")
         self.limit_max_L_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
 
-        self.limit_min_Z_entry = ctk.CTkEntry(self.limits_frame,
-                                              width=PARAMETER_ENTRY_WIDTH,
-                                              placeholder_text=f"{round(self.MIN_Z, 4)}")
+        self.limit_min_Z_entry = ctk.CTkEntry(self.limits_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.MIN_Z, 4)}")
         self.limit_min_Z_entry.grid(row=1, column=2, sticky="ew", padx=5, pady=2)
-        self.limit_max_Z_entry = ctk.CTkEntry(self.limits_frame,
-                                              width=PARAMETER_ENTRY_WIDTH,
-                                              placeholder_text=f"{round(self.MAX_Z, 4)}")
+        self.limit_max_Z_entry = ctk.CTkEntry(self.limits_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.MAX_Z, 4)}")
         self.limit_max_Z_entry.grid(row=2, column=2, sticky="ew", padx=5, pady=2)
 
-        self.limit_min_R_entry = ctk.CTkEntry(self.limits_frame,
-                                              width=PARAMETER_ENTRY_WIDTH,
-                                              placeholder_text=f"{round(self.MIN_R, 4)}")
+        self.limit_min_R_entry = ctk.CTkEntry(self.limits_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.MIN_R, 4)}")
         self.limit_min_R_entry.grid(row=1, column=3, sticky="ew", padx=5, pady=2)
-        self.limit_max_R_entry = ctk.CTkEntry(self.limits_frame,
-                                              width=PARAMETER_ENTRY_WIDTH,
-                                              placeholder_text=f"{round(self.MAX_R, 4)}")
+        self.limit_max_R_entry = ctk.CTkEntry(self.limits_frame,width=PARAMETER_ENTRY_WIDTH,placeholder_text=f"{round(self.MAX_R, 4)}")
         self.limit_max_R_entry.grid(row=2, column=3, sticky="ew", padx=5, pady=2)
 
-        self.set_limits_button = ctk.CTkButton(self.limits_frame,
-                                               width=PARAMETER_BUTTON_WIDTH,
-                                               text="Set all",
-                                               command=self.set_limits)
+        self.set_limits_button = ctk.CTkButton(self.limits_frame,width=PARAMETER_BUTTON_WIDTH,text="Set all",command=self.set_limits)
         self.set_limits_button.grid(row=1, column=4, sticky="ew", padx=10)
 
-        self.restore_limits_button = ctk.CTkButton(self.limits_frame,
-                                                   width=PARAMETER_BUTTON_WIDTH,
-                                                   text="Restore all",
-                                                   command=self.restore_limits)
+        self.restore_limits_button = ctk.CTkButton(self.limits_frame,width=PARAMETER_BUTTON_WIDTH,text="Restore all",command=self.restore_limits)
         self.restore_limits_button.grid(row=2, column=4, sticky="ew", padx=10)
 
-        # ============ Compensation Controls (INLINE) ============
-        self.compensate_frame = ctk.CTkFrame(self.parameters_inner_frame,
-                                          width=PARAMETER_FRAME_WIDTH, height=50)
+        # ============ Compensation Controls ============
+        self.compensate_frame = ctk.CTkFrame(self.parameters_inner_frame,width=PARAMETER_FRAME_WIDTH, height=50)
         self.compensate_frame.grid(row=first_row+5, column=0, sticky="ew", pady=(8, 8))
         self.compensate_frame.grid_propagate(False)
         for c in (0, 2):
          self.compensate_frame.columnconfigure(c, weight=1)
  
-        self.compensate_button = ctk.CTkButton(
-         self.compensate_frame, text="Reconstruction", width=120,
-         command=self._on_compensate)
-        self.compensate_button.grid(row=0, column=1, sticky="ew",
-                                 padx=3, pady=(10,10))
-        #self.compensate_button.grid(row=first_row + 5, column=0,pady=(18, 8),sticky="ew")
+        self.compensate_button = ctk.CTkButton(self.compensate_frame, text="Reconstruction", width=120,command=self._on_compensate)
+        self.compensate_button.grid(row=0, column=1, sticky="ew",padx=3, pady=(10,10))
 
     def _subtract_reference(self, holo_u8: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         if not self.ref_path:
@@ -1441,27 +1305,15 @@ class App(ctk.CTk):
             holo = holo_u8.astype(np.float64) / 255
             return holo_u8, holo
 
-        # Convert both to float in [0,1] then subtract (keep signed result)
-        #scale_h = (65535.0 if holo_u8.max() > 255 else 255.0)
-        #scale_r = (65535.0 if ref_arr.max()  > 255 else 255.0)
         holo_f  = holo_u8.astype(np.float64) / 255
         ref_f   = ref_arr.astype(np.float64) / 255
 
-        corr_f  = holo_f - ref_f                 # keep negative values if any
-        # Make a displayable uint8 preview (clip to [0,1] AFTER computing float)
+        corr_f  = holo_f - ref_f
         corr_u8 = np.uint8(np.clip(corr_f, 0.0, 1.0) * 255.0)
         return corr_u8, corr_f
     
     
     def _prepare_worker_image(self) -> tuple[np.ndarray, float]:
-        """
-        Returns:
-            worker_u8 : uint8 hologram for the recon worker.
-                        - No reference  -> raw self.arr_c_orig.
-                        - With reference -> signed subtraction mapped symmetrically
-                          around 128 (preserves negatives; avoids focus drift).
-            dxy_eff   : Effective pixel pitch in µm (accounts for downsample).
-        """
         base_u8 = self.arr_c_orig  # raw camera counts
         if base_u8 is None or base_u8.size == 0:
             raise RuntimeError("No hologram loaded.")
@@ -1476,13 +1328,6 @@ class App(ctk.CTk):
                 ref_u8  = np.asarray(ref_img)
                 if ref_u8.shape == base_u8.shape:
                     diff   = base_u8.astype(np.float64) - ref_u8.astype(np.float64)
-                    """
-                    max_val = float(np.max(diff))
-                    if max_val <= 0:
-                        max_val = 1.0
-                    # Mapear 0 → 0, max_val → 255
-                    worker_u8 = np.clip((diff / max_val) * 255.0, 0, 255).astype(np.uint8)
-                    """ 
                     maxabs = float(np.max(np.abs(diff)))
                     if maxabs > 0.0:
                         # Map signed [-maxabs, +maxabs] → [0,255] around 128
@@ -1495,23 +1340,12 @@ class App(ctk.CTk):
 
         if getattr(self, "DOWNSAMPLE_FACTOR", 1) and self.DOWNSAMPLE_FACTOR > 1:
             h, w = worker_u8.shape[:2]
-            worker_u8 = cv.resize(
-                worker_u8,
-                (w // self.DOWNSAMPLE_FACTOR, h // self.DOWNSAMPLE_FACTOR),
-                interpolation=cv.INTER_AREA)
+            worker_u8 = cv.resize(worker_u8,(w // self.DOWNSAMPLE_FACTOR, h // self.DOWNSAMPLE_FACTOR),interpolation=cv.INTER_AREA)
             dxy_eff = float(self.dxy) * float(self.DOWNSAMPLE_FACTOR)
 
         return worker_u8, dxy_eff
 
-
     def _on_compensate(self) -> None:
-        """
-        Build a clean reconstruction packet and invoke the worker synchronously.
-        Differences vs. your current UI:
-          • Worker sees raw or sym-subtracted hologram (no clipped negatives).
-          • Distances & pitch in µm (as before).
-          • 'phase' and 'squared' flags restored (legacy contract).
-        """
         self._ensure_reconstruction_worker()
         self.set_variables()
         self.set_value_L(); self.set_value_Z(); self.set_value_r()
@@ -1530,6 +1364,8 @@ class App(ctk.CTk):
 
         # Update left preview only (does NOT affect worker input)
         self.arr_c = worker_img_u8
+        self._holo_hash = self._fast_hash(self.arr_c)
+        self._last_recon_sig = None  # force next signature evaluation
         self._recompute_and_show(left=True)
 
         # Legacy-compatible payload (µm + original flags)
@@ -1549,7 +1385,7 @@ class App(ctk.CTk):
             "Processed_Image": False
         }
 
-        # Fire worker now
+        # Fire worker now (synchronous single-shot)
         if not self.queue_manager["reconstruction"]["input"].full():
             self.queue_manager["reconstruction"]["input"].put(self.recon_input)
         try:
@@ -1559,11 +1395,13 @@ class App(ctk.CTk):
             self.need_recon = True
             return
 
+        # Cache output and update right view
         self.recon_output = out
         self._update_recon_arrays()
         self.update_right_view()
-        self.need_recon = False
 
+        # Record the signature that produced this output to avoid immediate duplicates
+        self._last_recon_sig = self._make_recon_signature()
 
     def _distance_unit_update(self, _lbl, unit: str) -> None:
         # keep a reference for later automatic updates
@@ -1607,56 +1445,25 @@ class App(ctk.CTk):
         self.hide_holo_arrows()
 
     def _sync_filter_state_from_ui(self) -> None:
-        """
-        Keep the internal *manual_* BooleanVars and the numeric filter
-        parameters perfectly in-sync with the current state of the
-        check-boxes and sliders **on every frame.
-        """
+
         # Which side of the UI are the widgets currently targeting?
         left_side_selected = self.filter_image_var.get() == "CA"
 
         # (checkbox, manual-var-capture, manual-var-processed, slider-widget, handler-method)
-        controls = (
-            (self.gamma_checkbox_var,
-             self.manual_gamma_c_var,  self.manual_gamma_r_var,
-             self.gamma_slider,        self.adjust_gamma),
-
-            (self.contrast_checkbox_var,
-             self.manual_contrast_c_var,  self.manual_contrast_r_var,
-             self.contrast_slider,        self.adjust_contrast),
-
-            (self.adaptative_eq_checkbox_var,
-             self.manual_adaptative_eq_c_var,  self.manual_adaptative_eq_r_var,
-             None,                             self.adjust_adaptative_eq),
-
-            (self.highpass_checkbox_var,
-             self.manual_highpass_c_var,  self.manual_highpass_r_var,
-             self.highpass_slider,        self.adjust_highpass),
-
-            (self.lowpass_checkbox_var,
-             self.manual_lowpass_c_var,   self.manual_lowpass_r_var,
-             self.lowpass_slider,         self.adjust_lowpass),)
+        controls = ((self.gamma_checkbox_var, self.manual_gamma_c_var, self.manual_gamma_r_var, self.gamma_slider, self.adjust_gamma),
+            (self.contrast_checkbox_var, self.manual_contrast_c_var, self.manual_contrast_r_var, self.contrast_slider, self.adjust_contrast),
+            (self.adaptative_eq_checkbox_var,self.manual_adaptative_eq_c_var, self.manual_adaptative_eq_r_var, None, self.adjust_adaptative_eq),
+            (self.highpass_checkbox_var, self.manual_highpass_c_var, self.manual_highpass_r_var, self.highpass_slider, self.adjust_highpass),
+            (self.lowpass_checkbox_var, self.manual_lowpass_c_var, self.manual_lowpass_r_var, self.lowpass_slider, self.adjust_lowpass),)
 
         for ui_chk, man_cap, man_proc, slider, handler in controls:
             manual_var = man_cap if left_side_selected else man_proc
             manual_var.set(ui_chk.get())
-
             # If that filter is active, refresh its numeric value
             if manual_var.get() and slider is not None:
                 handler(slider.get())
     
-    def _update_recon_arrays(self,
-                         amp_arr:   np.ndarray | None = None,
-                         int_arr:   np.ndarray | None = None,
-                         phase_arr: np.ndarray | None = None):
-        """
-        Refresh internal buffers and thumbnails.
-
-        Matching the reference viewer:
-        - If the worker provided the complex field, derive amplitude from it and
-          scale by min–max per frame (no hard clipping).
-        - Phase is never normalized; it stays wrapped to [-pi, pi] and mapped to 8-bit.
-        """
+    def _update_recon_arrays(self,amp_arr:   np.ndarray | None = None,int_arr:   np.ndarray | None = None,phase_arr: np.ndarray | None = None):
 
         # 1) Pull the worker’s packet
         if amp_arr is None or phase_arr is None:
@@ -1672,8 +1479,7 @@ class App(ctk.CTk):
         if amp_arr is None or phase_arr is None:
             return
     
-        # 2) Build amplitude from the complex field when available
-        #    (this avoids the worker’s [0,1] clamp destroying contrast)
+        # 2) Build amplitude from the complex field 
         if field is not None:
             a_f   = np.abs(field).astype(np.float32)
             a_min = float(a_f.min())
@@ -1685,7 +1491,6 @@ class App(ctk.CTk):
             amp_arr = (np.clip(a_scaled, 0.0, 1.0) * 255.0).astype(np.uint8)
         
         # 3) If we somehow have no field (fallback), but a reference was used,
-        #    at least min–max the 8-bit that came from the worker.
         elif self.ref_path:
             a_f = amp_arr.astype(np.float32)
             rng = float(a_f.max() - a_f.min())
@@ -1697,8 +1502,6 @@ class App(ctk.CTk):
         self.original_phase_arrays     = [phase_arr.copy()]
         self.amplitude_arrays          = [amp_arr.copy()]
         self.phase_arrays              = [phase_arr.copy()]
-    
-        # Recompute intensity from the (possibly new) amplitude
         intens = (amp_arr.astype(np.float32) / 255.0) ** 2
         intens = (intens / (intens.max() + 1e-9) * 255.0).astype(np.uint8)
         self.original_intensity_arrays = [intens.copy()]
@@ -1713,31 +1516,20 @@ class App(ctk.CTk):
     
         # 6) Re-apply saved filters / colormaps (existing logic)
         self._ensure_filter_state_lists_length()
-
         st_amp   = self.filter_states_dim1[0]
         st_phase = self.filter_states_dim2[0]
-
         if self._filters_enabled(st_amp):
-            self.amplitude_arrays[0] = self._apply_filters_from_state(
-                self.amplitude_arrays[0], st_amp)
+            self.amplitude_arrays[0] = self._apply_filters_from_state(self.amplitude_arrays[0], st_amp)
         if self._filters_enabled(st_phase):
-            self.phase_arrays[0] = self._apply_filters_from_state(
-                self.phase_arrays[0], st_phase)
-
-        self.amplitude_arrays[0] = self._apply_ui_colormap(
-            self.amplitude_arrays[0], self._active_cmap_amp)
-        self.phase_arrays[0] = self._apply_ui_colormap(
-            self.phase_arrays[0], self._active_cmap_phase)
-
+            self.phase_arrays[0] = self._apply_filters_from_state(self.phase_arrays[0], st_phase)
+        self.amplitude_arrays[0] = self._apply_ui_colormap(self.amplitude_arrays[0], self._active_cmap_amp)
+        self.phase_arrays[0] = self._apply_ui_colormap(self.phase_arrays[0], self._active_cmap_phase)
         self._apply_live_speckle_if_active()
 
 
     def _remove_legacy_show_checkboxes(self):
         """Hide the old ‘Show Intensity’ and ‘Show Phase’ tick-boxes."""
-        for widget in (
-            getattr(self, "square_field_checkbox", None),
-            getattr(self, "Processed_Image_r_checkbox", None),
-        ):
+        for widget in (getattr(self, "square_field_checkbox", None),):
             if widget is not None:
                 widget.grid_remove()
 
@@ -1756,14 +1548,7 @@ class App(ctk.CTk):
         container = self.dist_dummy_entry.master
         for child in container.winfo_children():
             child.destroy()
-
-        self._distance_unit_menu = ctk.CTkOptionMenu(
-            container,
-            values=["nm", "µm", "mm", "cm"],
-            variable=self._dist_unit_var,
-            command=self._on_distance_unit_change,
-            width=90
-        )
+        self._distance_unit_menu = ctk.CTkOptionMenu(container,values=["nm", "µm", "mm", "cm"],variable=self._dist_unit_var,command=self._on_distance_unit_change,width=90)
         self._distance_unit_menu.grid(row=0, column=0, sticky="ew")
 
     def _on_distance_unit_change(self, new_unit: str) -> None:
@@ -1773,16 +1558,10 @@ class App(ctk.CTk):
             self._dist_unit_var.set(new_unit)
         self._refresh_distance_unit_labels()
 
-
     def _refresh_distance_unit_labels(self) -> None:
-        """
-        Redraw every caption / placeholder so they *speak* the unit
-        currently selected by the user, while the internal values stay
-        in micrometres (µm).
-        """
+
         u      = self.distance_unit
         factor = self._unit_factor(u)  # µm per <u>
-
         # Header & column titles
         if hasattr(self, "dist_label"):
             self.dist_label.configure(text=f"Distances ({u})")
@@ -1795,8 +1574,7 @@ class App(ctk.CTk):
 
         # Slider captions (preserve displayed numbers converted to the new unit)
         if hasattr(self, "L_slider_title"):
-            self.L_slider_title.configure(
-                text=f"Distance between camera and source L ({u}): "
+            self.L_slider_title.configure(text=f"Distance between camera and source L ({u}): "
                      f"{round(self.L / factor, 4)}")
         if hasattr(self, "Z_slider_title"):
             self.Z_slider_title.configure(
@@ -1920,15 +1698,8 @@ class App(ctk.CTk):
             self.img_r = self._preserve_aspect_ratio_right(im)
             self.processed_label.configure(image=self.img_r)
 
-    # ------------------------------------------------------------------
-    # apply_filters
-    # ------------------------------------------------------------------
     def apply_filters(self):
-        """
-        Runs the Tools-GUI filter pipeline **and** stores the current
-        UI-filter configuration so it is recalled the next time this
-        image/dimension is selected.
-        """
+
         # Make sure the state-tables are long enough
         self._ensure_frame_lists_length()
 
@@ -1964,12 +1735,6 @@ class App(ctk.CTk):
         self.update_right_view()
 
     def on_filters_dimensions_change(self, *args):
-        """
-        When the user toggles “Hologram / Amplitude / Phase” in the
-        Filters pane:
-          1.  Save the current widgets’ state to the *previous* image.
-          2.  Restore the widgets for the *new* selection.
-        """
         new_dim  = self.filters_dimensions_var.get()
         prev_dim = getattr(self, "_last_filters_dimension", None)
 
@@ -2193,6 +1958,10 @@ class App(ctk.CTk):
         
     
     def _ensure_reconstruction_worker(self) -> None:
+        """
+        Make sure the reconstruction process exists for DLHM_PP.
+        Uses a distinct entry-point (reconstruct_pp) so RT can keep its own.
+        """
         if getattr(self, "reconstruction", None) is not None and self.reconstruction.is_alive():
             return
         # Best effort: terminate any stale process
@@ -2201,12 +1970,19 @@ class App(ctk.CTk):
                 self.reconstruction.terminate()
         except Exception:
             pass
+
         from multiprocessing import Queue, Process
+        # Import here so we can point DLHM_PP to a dedicated entry point
+        try:
+            from parallel_rc import reconstruct_pp as _pp_target  # prefer PP-specific worker if present
+        except Exception:
+            from parallel_rc import reconstruct as _pp_target      # fallback to generic one
+
         self.queue_manager["reconstruction"] = {
             "input": Queue(1),
             "output": Queue(1),
         }
-        self.reconstruction = Process(target=reconstruct, args=(self.queue_manager,))
+        self.reconstruction = Process(target=_pp_target, args=(self.queue_manager,))
         self.reconstruction.start()
 
     def set_variables(self) -> None:
@@ -2344,25 +2120,13 @@ class App(ctk.CTk):
         self.update_parameters()
         self._schedule_reconstruction()
 
-    def _downsample_hologram(self, holo_u8: np.ndarray
-                             ) -> tuple[np.ndarray, float]:
-        """
-        Return a down-sampled hologram **and** the effective pixel-pitch.
+    def _downsample_hologram(self, holo_u8: np.ndarray) -> tuple[np.ndarray, float]:
 
-        • The original self.dxy is **never** modified, so pressing
-          “Compensate” multiple times no longer snowballs the pitch.
-        • The caller stores the returned pitch in `self._dxy_eff`.
-        """
         if self.DOWNSAMPLE_FACTOR <= 1:
-            return holo_u8, self.dxy                     # nothing to do
+            return holo_u8, self.dxy                   
 
         h, w = holo_u8.shape
-        holo_ds = cv.resize(
-            holo_u8,
-            (w // self.DOWNSAMPLE_FACTOR,
-             h // self.DOWNSAMPLE_FACTOR),
-            interpolation=cv.INTER_AREA
-        )
+        holo_ds = cv.resize(holo_u8,(w // self.DOWNSAMPLE_FACTOR,h // self.DOWNSAMPLE_FACTOR),interpolation=cv.INTER_AREA)
 
         dxy_eff = self.dxy * self.DOWNSAMPLE_FACTOR
         return holo_ds, dxy_eff
@@ -2377,15 +2141,35 @@ class App(ctk.CTk):
         self._recon_after = self.after(delay_ms, self._dispatch_reconstruction)
     
     def _dispatch_reconstruction(self) -> None:
-        """
-        Push the latest reconstruction packet to the worker (debounced).
-        """
+
         if not self._reconstruction_allowed():
             return
+
+        # Make sure the worker exists (prefer PP worker if available)
+        self._ensure_reconstruction_worker()
+
+        # Prepare the exact image & effective pitch for the worker
+        try:
+            worker_img_u8, dxy_eff = self._prepare_worker_image()
+        except Exception:
+            # Fallback to what's already on the left
+            worker_img_u8 = self.arr_c if isinstance(self.arr_c, np.ndarray) else self.arr_c_orig
+            dxy_eff = float(self.dxy)
+
+        # Build payload and override with prepared image/pitch
         self.update_inputs("reconstruction")
+        self.recon_input["image"] = worker_img_u8
+        self.recon_input["dxy"]   = float(dxy_eff)
+
+        # Skip if nothing really changed
+        sig = self._make_recon_signature(image_override=worker_img_u8, dxy_override=dxy_eff)
+        if sig is None or sig == self._last_recon_sig:
+            return
+
         if not self.queue_manager["reconstruction"]["input"].full():
             self.queue_manager["reconstruction"]["input"].put(self.recon_input)
-   
+            self._last_recon_sig = sig
+
     def update_Z(self, val) -> None:
         """Update Z from slider and keep L/r consistent."""
         self.Z = val
@@ -2445,11 +2229,7 @@ class App(ctk.CTk):
         self.update_r(user_val)
 
     def set_limits(self):
-        """
-        Read the limits the user typed **in the currently selected
-        unit**, convert them to µm for internal use, then push the new
-        ranges to the sliders.
-        """
+
         unit = self.distance_unit
         cvt  = lambda raw: self.get_value_in_micrometers(raw, unit)
 
@@ -2474,7 +2254,7 @@ class App(ctk.CTk):
         self.Z_slider.configure(from_=self.MIN_Z, to=self.MAX_Z)
         self.r_slider.configure(from_=self.MIN_R, to=self.MAX_R)
 
-        # Update the placeholders so the new limits are visible instantly
+        # Update the placeholders
         self._refresh_distance_unit_labels()
 
     def _ensure_filter_state_lists_length(self) -> None:
@@ -2532,11 +2312,7 @@ class App(ctk.CTk):
             ("JPEG",    "*.jpg"),
             ("All",     "*.*"),
         ]
-        target = ctk.filedialog.asksaveasfilename(
-            title="Save hologram image",
-            defaultextension=f".{ext}",
-            filetypes=filetypes,
-        )
+        target = ctk.filedialog.asksaveasfilename(title="Save hologram image",defaultextension=f".{ext}",filetypes=filetypes,)
         if not target:
             return
 
@@ -2553,11 +2329,7 @@ class App(ctk.CTk):
             ("JPEG",    "*.jpg"),
             ("All",     "*.*"),
         ]
-        target = ctk.filedialog.asksaveasfilename(
-            title="Save reconstruction image",
-            defaultextension=f".{ext}",
-            filetypes=filetypes,
-        )
+        target = ctk.filedialog.asksaveasfilename(title="Save reconstruction image",defaultextension=f".{ext}",filetypes=filetypes,)
         if not target:
             return
 
@@ -2569,9 +2341,7 @@ class App(ctk.CTk):
         color = "gray15" if mode == "Dark" else "gray85"
 
         # Update all CTkCanvas backgrounds
-        for canvas_attr in [
-         "filters_canvas", "tools_canvas", "param_canvas"
-        ]:
+        for canvas_attr in ["filters_canvas", "tools_canvas", "param_canvas"]:
          canvas = getattr(self, canvas_attr, None)
          if canvas is not None:
              canvas.configure(background=color)
@@ -2600,18 +2370,15 @@ class App(ctk.CTk):
 
     def _reconstruction_allowed(self) -> bool:
         """
-        We only auto-reconstruct when:
-          • user has pressed 'Reconstruction' at least once (need_recon == False)
-          • parameters are valid (wavelength & pixel size > 0)
-          • there is at least one hologram loaded
+        Auto-reconstruct whenever parameters are valid and there's a hologram loaded.
+        (No longer requires pressing the button first.)
         """
-        if getattr(self, "need_recon", True):
-            return False
         if not self._params_are_valid():
             return False
-        if not getattr(self, "multi_holo_arrays", []):
-            return False
-        return True
+        # Accept either a loaded hologram on the left or an internal array
+        if isinstance(getattr(self, "arr_c_orig", None), np.ndarray) and self.arr_c_orig.size > 0:
+            return True
+        return bool(getattr(self, "multi_holo_arrays", []))
 
     def _warn_missing_parameters(self) -> None:
         """
@@ -2638,6 +2405,50 @@ class App(ctk.CTk):
         self.dxy = 0.0
         self.need_recon = True
         self._show_waiting_for_compensate()
+        self._last_recon_sig = None   # tuple capturing (image, params)
+        self._holo_hash = None        # fast hash of current hologram (arr_c)
+
+    def _fast_hash(self, arr: np.ndarray) -> str:
+        try:
+            
+            h = hashlib.blake2b(arr.tobytes(), digest_size=16)
+            return h.hexdigest()
+        except Exception:
+            # Fallback – include shape/strides to reduce collisions
+            return f"{arr.shape}-{arr.strides}-{int(arr.sum())}"    
+
+
+    def _make_recon_signature(self,image_override: np.ndarray | None = None,dxy_override: float | None = None) -> tuple | None:
+        """
+        Build a lightweight signature of the effective reconstruction inputs.
+        Optionally use a specific image and/or dxy for hashing & signature.
+        """
+        if not self._reconstruction_allowed():
+            return None
+
+        base_img = image_override if image_override is not None else getattr(self, "arr_c", None)
+        if not isinstance(base_img, np.ndarray) or base_img.size == 0:
+            return None
+
+        # Hash the actual image that will be sent to the worker
+        holo_hash = self._fast_hash(base_img)
+        if image_override is None:
+            # keep internal cache in sync for future calls
+            self._holo_hash = holo_hash
+
+        alg = self.algorithm_var.get()
+        dxy_val = float(dxy_override if dxy_override is not None else self.dxy)
+
+        sig = (
+            holo_hash,
+            alg,
+            float(self.L), float(self.Z), float(self.r),
+            float(self.wavelength), dxy_val,
+            float(self.L / (self.Z or 1e-9)),   # scale_factor
+            bool(self.square_field.get()),
+            bool(self.Processed_Image_r.get()),
+        )
+        return sig
 
     def _customize_bio_analysis(self) -> None:
         """
@@ -2708,14 +2519,15 @@ class App(ctk.CTk):
         MainMenu().mainloop()
 
     def _require_new_compensation(self, *_):
-     """
-     Any change that invalidates the current reconstruction (for instance,
-     picking a different algorithm) ends up here.  
-     We mark the reconstruction as *out‑of‑date* and blank the right view
-     until the user presses **Compensate** again.
-     """
-     self.need_recon = True
-     #self._show_waiting_for_compensate()
+        """
+        Algorithm changes invalidate the current reconstruction.
+        Instead of forcing the button, auto-reconstruct if possible.
+        """
+        self._last_recon_sig = None
+        if self._reconstruction_allowed():
+            self._dispatch_reconstruction()
+        else:
+            self._show_waiting_for_compensate()
  
     def _show_waiting_for_compensate(self):
      """
@@ -2750,14 +2562,7 @@ class App(ctk.CTk):
      self.processed_label.configure(image=self.img_r)
  
     def selectfile(self):
-        """
-        Load **one** hologram and show it on the left viewer.
-        All previous reconstructions are cleared; the right viewer will stay
-        blank until the user hits **Compensate**.
 
-        CHANGE: If the current left view is 'Fourier Transform', display the FT
-        immediately in the selected (linear/log) mode instead of the raw hologram.
-        """
         # Fresh start
         self._reset_all_images()
 
@@ -2805,17 +2610,16 @@ class App(ctk.CTk):
         self.file_path = ''
 
     def draw(self):
-        """Main refresh loop (≈ 20 fps)."""
         start = time.time()
 
-        # 1) New reconstructions from the worker
+        # 1) Pull new reconstructions from the worker
         if not self.queue_manager["reconstruction"]["output"].empty():
             out = self.queue_manager["reconstruction"]["output"].get()
             self.recon_output = out
             self._update_recon_arrays()
             self.update_right_view()
 
-        # 2) Build filter lists to send to the worker (unchanged)
+        # 2) Rebuild filter lists (no worker push here)
         self.filters_c, self.filter_params_c = [], []
         if self.arr_c.size:
             if self.manual_contrast_c_var.get():
@@ -2841,18 +2645,16 @@ class App(ctk.CTk):
         if self.manual_lowpass_r_var.get():
             self.filters_r += ["lowpass"];   self.filter_params_r += [self.lowpass_r]
 
-        # 3) Only push work to reconstruction when it's allowed
-        self.update_inputs("reconstruction")
-        if self._reconstruction_allowed():
-            if not self.queue_manager["reconstruction"]["input"].full():
-                self.queue_manager["reconstruction"]["input"].put(self.recon_input)
-
-        # 4) FPS
+        # 3) FPS
         elapsed = time.time() - start
         fps = round(1 / elapsed, 1) if elapsed else 0.0
         self.max_w_fps = max(getattr(self, "max_w_fps", 0), min(fps, 144))
-        self.w_fps = fps or getattr(self, "w_fps", 0)
-        self._draw_after_id = self.after(50, self.draw)
+        try:
+            self.workflow_fps.configure(text = f" WF: {fps} / {self.max_w_fps} fps ")
+        except Exception:
+            pass
+
+        self.after(50, self.draw)
 
     def check_current_FC(self) -> None:
      """(Re)build the cosine filter used by Kreuzer."""
