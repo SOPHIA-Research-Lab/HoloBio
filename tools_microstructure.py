@@ -2,14 +2,14 @@ import cv2
 from scipy.ndimage import distance_transform_edt
 from skimage.segmentation import watershed
 from skimage import measure, morphology
+import pandas as pd
+from tkinter import ttk
+from tkinter import simpledialog, messagebox, filedialog
+from tkinter import messagebox, Toplevel
 from tkinter.scrolledtext import ScrolledText
-from tkinter import filedialog
+import tkinter as tk
 import numpy as np
 import matplotlib.pyplot as plt
-import pandas as pd
-import tkinter as tk
-from tkinter import ttk
-from tkinter import simpledialog, messagebox
 
 
 def create_binary_mask(image: np.ndarray, method: str = 'otsu', manual_threshold: float = 0.5) -> np.ndarray:
@@ -205,10 +205,6 @@ def apply_count_particles(image: np.ndarray, method: str, threshold=None, min_ar
     # Close all existing figures at the start
     plt.close('all')
 
-    if image is None:
-        print("No image provided. Using a sample image.")
-        image = np.random.randint(0, 256, (300, 300), dtype=np.uint8)
-
     # Get processed data
     final_mask, samples_circles, threshold_value, sample_is_white = process_particles(
         image, method, threshold, min_area, max_area, parent=parent
@@ -249,13 +245,6 @@ def apply_area_particles(image: np.ndarray, method: str, threshold=None, min_are
     """
     # Close all existing figures at the start
     plt.close('all')
-
-    if image is None:
-        print("No image provided. Using a sample image.")
-        image = np.random.randint(0, 256, (300, 300), dtype=np.uint8)
-
-    print(f"[Area Analysis] Method: {method}")
-    print(f"[Area Analysis] Min area: {min_area} | Max area: {max_area} | Manual threshold: {threshold}")
 
     # Get processed data
     final_mask, samples_circles, threshold_value, sample_is_white = process_particles(
@@ -587,13 +576,21 @@ def create_particle_table(samples_circles, parent=None):
     status_label.pack(side='left', padx=10, pady=2)
 
 
-def apply_thickness(image:np.ndarray, method='otsu', threshold=None, min_area=100, max_area=10000, ind_sample=1.33, ind_medium=1.00, parent=None):
+def apply_thickness(image: np.ndarray,
+                    method='otsu',
+                    threshold=None,
+                    min_area=100,
+                    max_area=10000,
+                    ind_sample=1.33,
+                    ind_medium=1.00,
+                    wavelength_um=None,
+                    parent=None):
     """
-    Calculates thickness from a grayscale phase image.
+    Calculates thickness from a grayscale phase image and also displays the delta-phase (Δφ) map.
     Assumes phase is encoded in 8-bit (0-255) and rescales to [-π, π].
     """
 
-    # Check if the user selected 'Amplitude'
+    # Mode must be PHASE
     if hasattr(parent, 'imageProcess_var') and parent.imageProcess_var.get() == 0:
         from tkinter import messagebox
         messagebox.showwarning(
@@ -602,52 +599,263 @@ def apply_thickness(image:np.ndarray, method='otsu', threshold=None, min_area=10
         )
         return
 
+    # Validate wavelength
+    if wavelength_um is None or wavelength_um <= 0:
+        messagebox.showinfo(
+            "Information",
+            "Please enter a valid Wavelength (µm) before proceeding."
+        )
+        return
+
+    # Validate refractive indices
+    if abs(ind_sample - ind_medium) < 1e-9:
+        messagebox.showinfo(
+            "Information",
+            "'Ind. Sample' must be different from 'Ind. Medium' to compute thickness."
+        )
+        return
+
     # Scale image [0, 255] → [-π, π]
     phase_image = (image.astype(np.float32) / 255.0) * (2 * np.pi) - np.pi
 
     # Binary mask
     binary_mask, _ = create_binary_mask(image=image, method=method, manual_threshold=threshold)
+
+    # Polarity dialog
     answer = simpledialog.askstring("Sample Polarity", "Is the sample white (w) or black (b)?", parent=parent)
     if answer is None:
         print("User cancelled input.")
         return
-
     sample_is_white = answer.strip().lower() == 'w'
 
-    # Background
+    # Background vs sample
     background_mask = ~binary_mask if sample_is_white else binary_mask
     sample_mask = binary_mask if sample_is_white else ~binary_mask
 
-    # Compute phase mean for the background
+    # Δφ (relative to background)
     avg_background_phase = np.mean(phase_image[background_mask])
-
-    # Compute delta phase
     delta_phi = np.abs(phase_image - avg_background_phase)
 
-    # Parámetros físicos
-    wavelength_um = 0.633  # nanometers
+    # ---- NEW: visualize Δφ (delta phase) ----
+    fig_delta = plt.figure(figsize=(6, 5))
+    im1 = plt.imshow(delta_phi, cmap='inferno')
+    plt.colorbar(im1, label='Δφ (rad)')
+    plt.title("Delta Phase (Δφ) Map")
+    plt.axis('off')
+    plt.tight_layout()
 
-    # Compute Thickness
+    def _bring_to_front_delta():
+        try:
+            fig_delta.canvas.manager.window.lift()
+            fig_delta.canvas.manager.window.attributes('-topmost', 1)
+            fig_delta.canvas.manager.window.attributes('-topmost', 0)
+        except Exception:
+            pass
+
+    # Call lift after 100 ms to ensure the window is ready
+    fig_delta.canvas.manager.window.after(100, _bring_to_front_delta)
+
+    # Thickness (uses wavelength from GUI)
     n_diff = ind_sample - ind_medium
     thickness_map = (delta_phi * wavelength_um) / (2 * np.pi * n_diff)
     thickness_map[~sample_mask] = 0
 
-    # Visualization
-    fig = plt.figure(figsize=(6, 5))
-    plt.imshow(thickness_map, cmap='inferno')
-    plt.colorbar(label='Thickness (µm)')
+    # Thickness visualization
+    fig_thick = plt.figure(figsize=(6, 5))
+    im2 = plt.imshow(thickness_map, cmap='inferno')
+    plt.colorbar(im2, label='Thickness (µm)')
     plt.title("Estimated Thickness Map")
     plt.axis('off')
     plt.tight_layout()
 
-    def bring_to_front():
-        fig.canvas.manager.window.lift()
-        fig.canvas.manager.window.attributes('-topmost', 1)
-        fig.canvas.manager.window.attributes('-topmost', 0)
+    def _bring_to_front_thick():
+        try:
+            fig_thick.canvas.manager.window.lift()
+            fig_thick.canvas.manager.window.attributes('-topmost', 1)
+            fig_thick.canvas.manager.window.attributes('-topmost', 0)
+        except Exception:
+            pass
 
     # Call lift after 100 ms to ensure the window is ready
-    fig.canvas.manager.window.after(100, bring_to_front)
+    fig_thick.canvas.manager.window.after(100, _bring_to_front_thick)
 
+    # Show both windows
     plt.show()
 
     return thickness_map
+
+
+
+def automaticProfile(image: np.ndarray, method: str, threshold=None, min_area=100, max_area=10000, μm_per_px=1.0, parent=None):
+    print("  ✔ Automatic Phase Profile")
+    plt.close('all')
+
+    final_mask, samples_circles, threshold_value, sample_is_white = process_particles(
+        image, method, threshold, min_area, max_area, μm_per_px
+    )
+
+    if not samples_circles:
+        messagebox.showinfo("Information", "No particles found for area analysis.")
+        return []
+
+    H, W = final_mask.shape
+    profile_extension = 1.5
+    mask_for_label = final_mask if sample_is_white else ~final_mask
+    labeled_image = measure.label(mask_for_label, connectivity=2)
+
+    def find_profile_endpoints(sample):
+        center_x, center_y = sample['center_x'], sample['center_y']
+        diameter = sample['diameter']
+        label_excl = sample.get('label')
+        min_extension = (diameter / 2) * 1.25
+        max_extension = (diameter / 2) * profile_extension
+        angles = np.linspace(0, np.pi, 36)
+
+        for angle in angles:
+            for extension in np.linspace(min_extension, max_extension, 8):
+                dx = extension * np.cos(angle)
+                dy = extension * np.sin(angle)
+                x1 = center_x - dx; y1 = center_y - dy
+                x2 = center_x + dx; y2 = center_y + dy
+
+                if not (0 <= x1 < W and 0 <= y1 < H and 0 <= x2 < W and 0 <= y2 < H):
+                    continue
+
+                xi1 = int(np.clip(round(x1), 0, W - 1))
+                yi1 = int(np.clip(round(y1), 0, H - 1))
+                xi2 = int(np.clip(round(x2), 0, W - 1))
+                yi2 = int(np.clip(round(y2), 0, H - 1))
+
+                v1 = final_mask[yi1, xi1]
+                v2 = final_mask[yi2, xi2]
+                inside1 = v1 if sample_is_white else (not v1)
+                inside2 = v2 if sample_is_white else (not v2)
+                if inside1 or inside2:
+                    continue
+
+                npts = max(int(np.hypot(x2 - x1, y2 - y1)), 2)
+                xs = np.linspace(x1, x2, npts).astype(int)
+                ys = np.linspace(y1, y2, npts).astype(int)
+                xs = np.clip(xs, 0, W - 1)
+                ys = np.clip(ys, 0, H - 1)
+
+                line_labels = labeled_image[ys, xs]
+                labs = np.unique(line_labels)
+                labs = labs[labs != 0]
+                if label_excl is not None:
+                    labs = labs[labs != label_excl]
+                if len(labs) > 0:
+                    continue
+
+                return (x1, y1), (x2, y2), angle, extension
+        return None
+
+    samples_profiles = []
+    valid_samples = []
+    failed_samples = []
+
+    for i, sample in enumerate(samples_circles):
+        print(f"Processing Sample {i + 1}/{len(samples_circles)}...")
+        res = find_profile_endpoints(sample)
+        if res is None:
+            print(f"Sample {i}: Could not find valid profile line - EXCLUDED from analysis")
+            failed_samples.append(i)
+            continue
+
+        (x1, y1), (x2, y2), angle, extension = res
+        num_points = max(int(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)), 2)
+        x_coords = np.linspace(x1, x2, num_points).astype(int)
+        y_coords = np.linspace(y1, y2, num_points).astype(int)
+        x_coords = np.clip(x_coords, 0, W - 1)
+        y_coords = np.clip(y_coords, 0, H - 1)
+
+        phase_img = image.astype(np.float32)
+
+        # map integer images to [0, 2π]
+        if np.issubdtype(image.dtype, np.integer):
+            maxv = np.iinfo(image.dtype).max
+            phase_img = (phase_img / maxv) * (2 * np.pi)
+        else:
+            # heuristic: if dynamic range >> 2π, normalize to [0, 2π]
+            if phase_img.max() > 2 * np.pi * 1.5:
+                mmin, mmax = phase_img.min(), phase_img.max()
+                phase_img = (phase_img - mmin) / max(mmax - mmin, 1e-9) * (2 * np.pi)
+
+        # sample and wrap to [-π, π]
+        phase_profile = phase_img[y_coords, x_coords]
+        phase_profile = (phase_profile + np.pi) % (2 * np.pi) - np.pi
+
+        profile_dict = {
+            'sample_id': i,
+            'center': (sample['center_x'], sample['center_y']),
+            'diameter': sample['diameter'],
+            'area': sample['area'],
+            'angle': angle,
+            'extension': extension,
+            'endpoints': ((x1, y1), (x2, y2)),
+            'coordinates': (x_coords, y_coords),
+            'phase_profile': phase_profile
+        }
+
+        samples_profiles.append(profile_dict)
+        valid_samples.append(i)
+        print(f"  ✓ Sample {i}: Valid profile extracted (angle: {angle:.2f} rad, extension: {extension:.1f} px)")
+        print(f"    Endpoints: ({x1:.1f},{y1:.1f}) to ({x2:.1f},{y2:.1f})")
+
+    samples_circles = [samples_circles[i] for i in valid_samples]
+
+    print("\n Profile extraction summary:")
+    print(f"  Valid samples: {len(samples_profiles)}")
+    print(f"  Excluded samples: {len(failed_samples)}")
+    if failed_samples:
+        print(f"  Excluded sample IDs: {failed_samples}")
+
+    # overlay figure
+    if len(samples_profiles) > 0:
+        plt.figure(figsize=(7, 7))
+        im = plt.imshow(image, cmap='viridis')
+        ax = plt.gca()
+        for i, prof in enumerate(samples_profiles):
+            (x1, y1), (x2, y2) = prof['endpoints']
+            s = samples_circles[i]
+            circ = plt.Circle((s['center_x'], s['center_y']), s['diameter']/2, fill=False, color='white', linewidth=1)
+            ax.add_patch(circ)
+            plt.plot([x1, x2], [y1, y2], linewidth=2)
+            plt.plot([x1, x2], [y1, y2], 'o')
+        plt.title(f'Valid Profile Lines ({len(samples_profiles)})')
+        plt.axis('off')
+        plt.colorbar(im, label='Phase (rad)')
+        plt.tight_layout()
+        plt.show()
+
+    # phase-shift summary popup
+    results = []
+    pct = 0.05
+    for p in samples_profiles:
+        data = p['phase_profile']
+        max_val = np.max(data); min_val = np.min(data)
+        max_thr = max_val - max_val * pct
+        min_thr = min_val + abs(min_val) * pct
+        max_mask = data >= max_thr
+        min_mask = data <= min_thr
+        max_avg = np.mean(data[max_mask]) if np.any(max_mask) else max_val
+        min_avg = np.mean(data[min_mask]) if np.any(min_mask) else min_val
+        delta = float(abs(max_avg - min_avg))
+        results.append((p['sample_id'], delta))
+
+    if parent is None:
+        root = tk.Tk(); root.withdraw()
+        win = Toplevel()
+    else:
+        win = Toplevel(parent)
+    win.title("Phase Shift Results")
+    win.geometry("500x600")
+    txt = ScrolledText(win, wrap='word', font=('Courier', 10))
+    lines = ["=== Phase Shift Summary ===", f"Total samples: {len(results)}", ""]
+    for sid, dphi in results:
+        lines.append(f"Sample {sid+1}: Δφ = {dphi:.3f} rad")
+    txt.insert("1.0", "\n".join(lines))
+    txt.configure(state="disabled")
+    txt.pack(expand=True, fill="both")
+
+    return samples_profiles

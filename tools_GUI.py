@@ -1,3 +1,4 @@
+
 # tools_GUI.py
 import numpy as np
 import cv2
@@ -495,6 +496,7 @@ def apply_microstructure(app):
             max_area=params['Max Area'],
             parent=app
         )
+
     if app.particles_areas_var.get():
         tmic.apply_area_particles(
             image,
@@ -505,8 +507,17 @@ def apply_microstructure(app):
             μm_per_px=μm_per_px,
             parent=app
         )
+
     if app.automatic_profile_var.get():
-        print("  ✔ Automatic Phase Profile")
+        tmic.automaticProfile(
+            image,
+            method=thresh_method.lower(),
+            threshold=params['Threshold'],
+            min_area=params['Min Area'],
+            max_area=params['Max Area'],
+            μm_per_px=μm_per_px,
+            parent=app)
+
     if app.profile_thickness_var.get():
          tmic.apply_thickness(
             image,
@@ -2027,7 +2038,7 @@ def _wire_scalebar_interaction(
         fig.canvas.mpl_connect("button_press_event",   _on_press_any)
 
 
-def _show_popup_image(parent,arr: np.ndarray, title: str = "Speckle filtered"):
+def _show_popup_image(parent,arr: np.ndarray, title: str = "Speckle filtered"):
      win = tk.Toplevel(parent)
      win.title(title)
      im = Image.fromarray(arr)
