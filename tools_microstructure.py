@@ -810,15 +810,15 @@ def automaticProfile(image: np.ndarray, method: str, threshold=None, min_area=10
     if failed_samples:
         print(f"  Excluded sample IDs: {failed_samples}")
 
-    # overlay figure
     if len(samples_profiles) > 0:
         plt.figure(figsize=(7, 7))
-        im = plt.imshow(image, cmap='viridis')
+        im = plt.imshow(phase_img, cmap='viridis', vmin=-np.pi, vmax=np.pi)
         ax = plt.gca()
         for i, prof in enumerate(samples_profiles):
             (x1, y1), (x2, y2) = prof['endpoints']
             s = samples_circles[i]
-            circ = plt.Circle((s['center_x'], s['center_y']), s['diameter']/2, fill=False, color='white', linewidth=1)
+            circ = plt.Circle((s['center_x'], s['center_y']), s['diameter'] / 2,
+                              fill=False, color='white', linewidth=1)
             ax.add_patch(circ)
             plt.plot([x1, x2], [y1, y2], linewidth=2)
             plt.plot([x1, x2], [y1, y2], 'o')
