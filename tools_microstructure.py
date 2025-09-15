@@ -685,7 +685,6 @@ def apply_thickness(image: np.ndarray,
     return thickness_map
 
 
-
 def automaticProfile(image: np.ndarray, method: str, threshold=None, min_area=100, max_area=10000, μm_per_px=1.0, parent=None):
     print("  ✔ Automatic Phase Profile")
     plt.close('all')
@@ -769,8 +768,8 @@ def automaticProfile(image: np.ndarray, method: str, threshold=None, min_area=10
         x_coords = np.clip(x_coords, 0, W - 1)
         y_coords = np.clip(y_coords, 0, H - 1)
 
-        phase_img = image.astype(np.float32)
-
+        phase_img = (image.astype(np.float32) / 255.0) * (2 * np.pi) - np.pi
+        '''
         # map integer images to [0, 2π]
         if np.issubdtype(image.dtype, np.integer):
             maxv = np.iinfo(image.dtype).max
@@ -780,7 +779,7 @@ def automaticProfile(image: np.ndarray, method: str, threshold=None, min_area=10
             if phase_img.max() > 2 * np.pi * 1.5:
                 mmin, mmax = phase_img.min(), phase_img.max()
                 phase_img = (phase_img - mmin) / max(mmax - mmin, 1e-9) * (2 * np.pi)
-
+        '''
         # sample and wrap to [-π, π]
         phase_profile = phase_img[y_coords, x_coords]
         phase_profile = (phase_profile + np.pi) % (2 * np.pi) - np.pi
@@ -799,8 +798,8 @@ def automaticProfile(image: np.ndarray, method: str, threshold=None, min_area=10
 
         samples_profiles.append(profile_dict)
         valid_samples.append(i)
-        print(f"  ✓ Sample {i}: Valid profile extracted (angle: {angle:.2f} rad, extension: {extension:.1f} px)")
-        print(f"    Endpoints: ({x1:.1f},{y1:.1f}) to ({x2:.1f},{y2:.1f})")
+        # print(f"  Sample {i}: Valid profile extracted (angle: {angle:.2f} rad, extension: {extension:.1f} px)")
+        # print(f"  Endpoints: ({x1:.1f},{y1:.1f}) to ({x2:.1f},{y2:.1f})")
 
     samples_circles = [samples_circles[i] for i in valid_samples]
 
