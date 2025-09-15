@@ -1027,26 +1027,6 @@ class App(ctk.CTk):
 
         self.hide_holo_arrows()
 
-    def show_save_options(self):
-        """
-        Now it offers "Save FT", "Save Phase", and "Save Amplitude".
-        If you click "Save FT", we actually store the Fourier transform images
-        (not the hologram).
-        """
-        # If user re-clicks while open, just hide it
-        if hasattr(self, 'save_options_menu') and self.save_options_menu.winfo_ismapped():
-            self.save_options_menu.grid_forget()
-            return
-
-        self.save_options_menu = ctk.CTkOptionMenu(
-            self.buttons_frame,
-            values=["Save FT", "Save Phase", "Save Amplitude"],
-            command=lambda option: self._handle_save_option(option),
-            width=270
-        )
-        self.save_options_menu.set("Save")
-        self.save_options_menu.grid(row=0, column=2, padx=4, pady=5, sticky='w')
-
     def ask_filename(self, option, default_name=""):
         def on_submit():
             self.filename = entry.get()

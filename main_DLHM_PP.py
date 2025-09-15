@@ -181,7 +181,7 @@ class App(ctk.CTk):
         # Initialize frames
         self._sync_canvas_and_frame_bg()
         self.init_viewing_frame()
-        self.init_saving_frame()
+        #self.init_saving_frame()
         self.update_inputs()
         self.after(0, self.after_idle_setup)
         self.after(0, self.draw)
@@ -656,6 +656,7 @@ class App(ctk.CTk):
   
     def _on_save_select(self, choice: str):
         {"Save FT":        self.save_capture,
+         "Save Hologram":  self.save_hologram,
          "Save Phase":     self.save_processed,
          "Save Amplitude": self.save_processed}.get(choice, lambda: None)()
         self.after(100, self._reset_toolbar_labels) 
@@ -1878,48 +1879,6 @@ class App(ctk.CTk):
 
         return max_speckle_contrast, x1, y1, x2, y2, sample
 
-    def init_saving_frame(self):
-        # Frame to activate and configure image enhancement filters
-        self.so_frame = ctk.CTkFrame(self, corner_radius=8, width=SAVING_FRAME_WIDTH)
-        self.so_frame.grid_propagate(False)
-
-        self.main_title_so= ctk.CTkLabel(self.so_frame, text='Saving Options')
-        self.main_title_so.grid(row=0, column=0, padx=20, pady=40, sticky='nsew')
-
-        self.static_frame = ctk.CTkFrame(self.so_frame, width=SAVING_FRAME_WIDTH, height=SAVING_FRAME_HEIGHT)
-        self.static_frame.grid(row=1, column=0, sticky='ew', pady=2)
-        self.static_frame.grid_propagate(False)
-
-        self.static_frame.columnconfigure(0, weight=1)
-        self.static_frame.columnconfigure(1, weight=0)
-        self.static_frame.columnconfigure(2, weight=0)
-        self.static_frame.columnconfigure(3, weight=1)
-
-        self.static_button = ctk.CTkButton(self.static_frame, text='Use static image', command=self.selectfile)
-        self.static_button.grid(row=0, column=1, padx=20, pady=20)
-
-        self.real_button = ctk.CTkButton(self.static_frame, text='Real time view', command=self.return_to_stream)
-        self.real_button.grid(row=0, column=2, padx=20, pady=20)
-
-        self.nofilter_frame = ctk.CTkFrame(self.so_frame, width=SAVING_FRAME_WIDTH, height=SAVING_FRAME_HEIGHT)
-        self.nofilter_frame.grid(row=2, column=0, sticky='ew', pady=2)
-        self.nofilter_frame.grid_propagate(False)
-
-        self.nofilter_frame.columnconfigure(0, weight=1)
-        self.nofilter_frame.columnconfigure(1, weight=0)
-        self.nofilter_frame.columnconfigure(2, weight=0)
-        self.nofilter_frame.columnconfigure(3, weight=1)
-
-        self.nf_title_label = ctk.CTkLabel(self.nofilter_frame, text='Saved without filters')
-        self.nf_title_label.grid(row=0, column=1, columnspan=2, padx=20, pady=5, sticky='nsew')
-        self.nf_c_button = ctk.CTkButton(self.nofilter_frame, text='Save capture', command=self.no_filter_save_c)
-        self.nf_c_button.grid(row=1, column=1, padx=20, pady=20)
-        self.nf_r_button = ctk.CTkButton(self.nofilter_frame, text='Save reconstruction', command=self.no_filter_save_r)
-        self.nf_r_button.grid(row=1, column=2, padx=20, pady=20)
-        self.so_frame.rowconfigure(8, weight=1)
-        self.home_button = ctk.CTkButton(self.so_frame, text='Home', command=lambda: self.change_menu_to('home'))
-        self.home_button.grid(row=8, column=0, pady=20, sticky='s')
-
     def no_filter_save_c(self):
         '''Saves a capture with an increasing number'''
         i = 0
@@ -2298,11 +2257,29 @@ class App(ctk.CTk):
         # Bio-Analysis
         self.bio_frame.grid(row=0, column=0, sticky="nsew", padx=5) \
             if name == "bio" else self.bio_frame.grid_forget()
-        # Saving Options
-        self.so_frame.grid(row=0, column=0, sticky="nsew", padx=5) \
-            if name == "so" else self.so_frame.grid_forget()
-     
 
+     
+    def save_hologram(self, ext: str = "bmp"):
+        """Open a ‘Save as…’ dialog and store the current hologram frame."""
+        filetypes = [
+            ("Bitmap", "*.bmp"),
+            ("PNG",     "*.png"),
+            ("TIFF",    "*.tif"),
+            ("JPEG",    "*.jpg"),
+            ("All",     "*.*"),
+        ]
+        target = ctk.filedialog.asksaveasfilename(
+            title="Save hologram image",
+            defaultextension=f".{ext}",
+            filetypes=filetypes,
+        )
+        if not target:
+            return
+    
+        # Save from the NumPy array directly
+        pil_img = Image.fromarray(self.arr_c)
+        pil_img.save(target)
+  
     def save_capture(self, ext: str = "bmp"):
         """Open a ‘Save as…’ dialog and store the *current* hologram frame."""
         filetypes = [
@@ -2312,14 +2289,18 @@ class App(ctk.CTk):
             ("JPEG",    "*.jpg"),
             ("All",     "*.*"),
         ]
-        target = ctk.filedialog.asksaveasfilename(title="Save hologram image",defaultextension=f".{ext}",filetypes=filetypes,)
+        target = ctk.filedialog.asksaveasfilename(
+            title="Save hologram image",
+            defaultextension=f".{ext}",
+            filetypes=filetypes,
+        )
         if not target:
             return
-
-        # Grab living inside the CTkImage and save it
-        pil_img: Image.Image = self.img_c.cget("light_image")
+    
+        # Save from the NumPy array directly
+        pil_img = Image.fromarray(self.arr_c)
         pil_img.save(target)
-
+    
     def save_processed(self, ext: str = "bmp"):
         """Open a ‘Save as…’ dialog and store the *current* reconstruction."""
         filetypes = [
@@ -2329,13 +2310,17 @@ class App(ctk.CTk):
             ("JPEG",    "*.jpg"),
             ("All",     "*.*"),
         ]
-        target = ctk.filedialog.asksaveasfilename(title="Save reconstruction image",defaultextension=f".{ext}",filetypes=filetypes,)
+        target = ctk.filedialog.asksaveasfilename(
+            title="Save reconstruction image",
+            defaultextension=f".{ext}",
+            filetypes=filetypes,
+        )
         if not target:
             return
-
-        pil_img: Image.Image = self.img_r.cget("light_image")
+    
+        pil_img = Image.fromarray(self.arr_r)
         pil_img.save(target)
-
+    
     def _sync_canvas_and_frame_bg(self):
         mode = ctk.get_appearance_mode()
         color = "gray15" if mode == "Dark" else "gray85"

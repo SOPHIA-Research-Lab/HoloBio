@@ -1101,22 +1101,22 @@ class App(ctk.CTk):
         self._sync_canvas_and_frame_bg()
 
     def _compute_ft(self, arr: np.ndarray) -> np.ndarray:
-     """Compute the Fourier Transform of a 2D array and return a uint8 image."""
-      if arr is None or arr.size == 0:
-          return np.zeros((1, 1), dtype=np.uint8)
-      f = np.fft.fftshift(np.fft.fft2(arr.astype(np.float32)))
-      mag = np.abs(f)
-      use_log = True
-      try:
-          use_log = (str(self.ft_mode_var.get()) == "With logarithmic scale")
-      except Exception:
-          pass
-      if use_log:
-          mag = np.log1p(mag)
-          mag = mag / (mag.max() + 1e-12)
-      else:
-          mag = mag / (mag.max() + 1e-12)
-      return (mag * 255.0).astype(np.uint8)
+        """Compute the Fourier Transform of a 2D array and return a uint8 image."""
+        if arr is None or arr.size == 0:
+            return np.zeros((1, 1), dtype=np.uint8)
+        f = np.fft.fftshift(np.fft.fft2(arr.astype(np.float32)))
+        mag = np.abs(f)
+        use_log = True
+        try:
+            use_log = (str(self.ft_mode_var.get()) == "With logarithmic scale")
+        except Exception:
+            pass
+        if use_log:
+            mag = np.log1p(mag)
+            mag = mag / (mag.max() + 1e-12)
+        else:
+            mag = mag / (mag.max() + 1e-12)
+        return (mag * 255.0).astype(np.uint8)
 
     def _force_initial_refit(self) -> None:
         try:

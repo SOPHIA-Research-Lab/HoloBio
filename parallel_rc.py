@@ -517,17 +517,13 @@ def reconstruct(queue_manager: dict[str, dict[str, Queue]]) -> None:
 
 
         elif algorithm == "KR":
-
             s  = min(M, N)
             y0 = (M - s) // 2
             x0 = (N - s) // 2
-            #field_sq = cached_spec[y0:y0 + s, x0:x0 + s]
             holo_sq  = holo_u8[y0:y0 + s, x0:x0 + s] 
             R0   = int(inp.get("cosine_period", 100))
             FC  = filtcosenoF(R0, s, 0)
             deltaX = Z * dxy / L   
-            #holo_sq_complex = holo_sq.astype(np.complex128)
-            #np.save("holo_sq_complex_Holo_sinrefe_interfaz.npy", holo_sq_complex)
             Uz  = kreuzer3F(Z, holo_sq, wl, dxy, deltaX, L, FC)
             amp_f   = np.abs(Uz)
             phase_f = np.angle(Uz)
@@ -592,9 +588,8 @@ def reconstruct_pp(queue_manager: dict[str, dict[str, "Queue"]]) -> None:
         r  = float(inp.get("r", 0.0))
         wl = float(inp.get("wavelength", 0.0))
         dxy = float(inp.get("dxy", 0.0))
-
-        # App already computes this; keep the same name for kernels that expect it.
-        scale = float(inp.get("scale_factor", (L / (Z or 1e-9))))
+        deltaX = Z * dxy / L
+        scale     = inp["scale_factor"]
 
         # Optional extras (ignored by kernels here but kept for completeness)
         R0 = int(inp.get("cosine_period", 100))
@@ -610,7 +605,7 @@ def reconstruct_pp(queue_manager: dict[str, dict[str, "Queue"]]) -> None:
 
         # --- 4) Build a full parameter signature to skip redundant recomputes ---
         param_sig = (last_holo_hash, algorithm, L, Z, r, wl, dxy, scale, R0)
-
+        #print(L,Z,r,wl,dxy)
         if param_sig == last_param_sig and last_result is not None:
             # Nothing changed since last successful reconstruction → just re-emit
             if not queue_manager["reconstruction"]["output"].full():
@@ -633,7 +628,6 @@ def reconstruct_pp(queue_manager: dict[str, dict[str, "Queue"]]) -> None:
             holo_sq = holo_u8[y0:y0 + s, x0:x0 + s]
 
             FC = filtcosenoF(R0, s, 0)
-            deltaX = Z * dxy / (L or 1e-12)
 
             Uz = kreuzer3F(Z, holo_sq, wl, dxy, deltaX, L, FC)
             amp_f   = np.abs(Uz)
