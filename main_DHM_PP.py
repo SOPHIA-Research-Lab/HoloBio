@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from importlib import import_module, reload
 import cv2
+import matplotlib.pyplot as plt
 
 # Third-Party Libraries
 import customtkinter as ctk
@@ -1027,6 +1028,26 @@ class App(ctk.CTk):
             self.captured_label.configure(image=tk_ft)
 
         self.hide_holo_arrows()
+
+    def show_save_options(self):
+        """
+        Now it offers "Save FT", "Save Phase", and "Save Amplitude".
+        If you click "Save FT", we actually store the Fourier transform images
+        (not the hologram).
+        """
+        # If user re-clicks while open, just hide it
+        if hasattr(self, 'save_options_menu') and self.save_options_menu.winfo_ismapped():
+            self.save_options_menu.grid_forget()
+            return
+
+        self.save_options_menu = ctk.CTkOptionMenu(
+            self.buttons_frame,
+            values=["Save FT", "Save Phase", "Save Amplitude"],
+            command=lambda option: self._handle_save_option(option),
+            width=270
+        )
+        self.save_options_menu.set("Save")
+        self.save_options_menu.grid(row=0, column=2, padx=4, pady=5, sticky='w')
 
     def ask_filename(self, option, default_name=""):
         def on_submit():
