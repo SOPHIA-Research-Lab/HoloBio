@@ -2109,6 +2109,8 @@ class App(ctk.CTk):
             placeholder_text=f"{round(self.r / factor, 4)}")
         # Magnification stays unit-free (ratio)
         self.scale_factor = self.L / self.Z if self.Z != 0 else self.L / MIN_DISTANCE
+        if hasattr(self, "magnification_label"):
+         self.magnification_label.configure(text=f"Magnification: {round(self.scale_factor, 2)}")
 
     def update_L(self, val):
         '''Updates the value of L based on the slider'''

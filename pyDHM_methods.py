@@ -290,6 +290,7 @@ def spatialFilteringCF(field, height, width, filter_type="Circular", manual_coor
 
     # Hologram Fourier Transform
     ft = np.fft.fftshift(np.fft.fft2(field))
+    ft[0:5,0:5]=0
 
     # Remueve el DC centrado correctamente
     center_x, center_y = width // 2, height // 2
