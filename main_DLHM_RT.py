@@ -1652,7 +1652,7 @@ class App(ctk.CTk):
                                                      variable=self.algorithm_var, value="KR")
         self.kr_algorithm_radio.grid(row=1, column=1, sticky="w", padx=5, pady=5)
 
-        self.dl_algorithm_radio = ctk.CTkRadioButton(self.algorithm_frame, text="DLHM", variable=self.algorithm_var,
+        self.dl_algorithm_radio = ctk.CTkRadioButton(self.algorithm_frame, text="Realistic A.S", variable=self.algorithm_var,
                                                      value="DL")
         self.dl_algorithm_radio.grid(row=1, column=2, sticky="w", padx=5, pady=5)
 
