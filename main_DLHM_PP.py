@@ -1625,37 +1625,37 @@ class App(ctk.CTk):
         # Slider captions (preserve displayed numbers converted to the new unit)
         if hasattr(self, "L_slider_title"):
             self.L_slider_title.configure(text=f"Distance between camera and source L ({u}): "
-                                               f"{round(self.L / factor, 4)}")
+                                               f"{round(self.L / factor, 2)}")
         if hasattr(self, "Z_slider_title"):
             self.Z_slider_title.configure(
                 text=f"Distance between sample and source Z ({u}): "
-                     f"{round(self.Z / factor, 4)}")
+                     f"{round(self.Z / factor, 2)}")
         if hasattr(self, "r_slider_title"):
             self.r_slider_title.configure(
                 text=f"Reconstruction distance r ({u}): "
-                     f"{round(self.r / factor, 4)}")
+                     f"{round(self.r / factor, 2)}")
 
         # Slider-entry placeholders
         if hasattr(self, "L_slider_entry"):
-            self.L_slider_entry.configure(placeholder_text=f"{round(self.L / factor, 4)}")
+            self.L_slider_entry.configure(placeholder_text=f"{round(self.L / factor, 2)}")
         if hasattr(self, "Z_slider_entry"):
-            self.Z_slider_entry.configure(placeholder_text=f"{round(self.Z / factor, 4)}")
+            self.Z_slider_entry.configure(placeholder_text=f"{round(self.Z / factor, 2)}")
         if hasattr(self, "r_slider_entry"):
-            self.r_slider_entry.configure(placeholder_text=f"{round(self.r / factor, 4)}")
+            self.r_slider_entry.configure(placeholder_text=f"{round(self.r / factor, 2)}")
 
         # Limits-frame placeholders
         if hasattr(self, "limit_min_L_entry"):
-            self.limit_min_L_entry.configure(placeholder_text=f"{round(self.MIN_L / factor, 4)}")
+            self.limit_min_L_entry.configure(placeholder_text=f"{round(self.MIN_L / factor, 2)}")
         if hasattr(self, "limit_max_L_entry"):
-            self.limit_max_L_entry.configure(placeholder_text=f"{round(self.MAX_L / factor, 4)}")
+            self.limit_max_L_entry.configure(placeholder_text=f"{round(self.MAX_L / factor, 2)}")
         if hasattr(self, "limit_min_Z_entry"):
-            self.limit_min_Z_entry.configure(placeholder_text=f"{round(self.MIN_Z / factor, 4)}")
+            self.limit_min_Z_entry.configure(placeholder_text=f"{round(self.MIN_Z / factor, 2)}")
         if hasattr(self, "limit_max_Z_entry"):
-            self.limit_max_Z_entry.configure(placeholder_text=f"{round(self.MAX_Z / factor, 4)}")
+            self.limit_max_Z_entry.configure(placeholder_text=f"{round(self.MAX_Z / factor, 2)}")
         if hasattr(self, "limit_min_R_entry"):
-            self.limit_min_R_entry.configure(placeholder_text=f"{round(self.MIN_R / factor, 4)}")
+            self.limit_min_R_entry.configure(placeholder_text=f"{round(self.MIN_R / factor, 2)}")
         if hasattr(self, "limit_max_R_entry"):
-            self.limit_max_R_entry.configure(placeholder_text=f"{round(self.MAX_R / factor, 4)}")
+            self.limit_max_R_entry.configure(placeholder_text=f"{round(self.MAX_R / factor, 2)}")
 
     def _run_filters_pipeline(self, img: np.ndarray,
                               use_left_side: bool) -> np.ndarray:
@@ -2093,20 +2093,20 @@ class App(ctk.CTk):
         factor = self._unit_factor(u)
         self.Z_slider_title.configure(
             text=f"Distance between sample and source Z ({u}): "
-                 f"{round(self.Z / factor, 4)}")
+                 f"{round(self.Z / factor, 2)}")
         self.L_slider_title.configure(
             text=f"Distance between camera and source L ({u}): "
-                 f"{round(self.L / factor, 4)}")
+                 f"{round(self.L / factor, 2)}")
         self.r_slider_title.configure(
             text=f"Reconstruction distance r ({u}): "
-                 f"{round(self.r / factor, 4)}")
+                 f"{round(self.r / factor, 2)}")
         # Update entry placeholders so the user always sees the unit
         self.Z_slider_entry.configure(
-            placeholder_text=f"{round(self.Z / factor, 4)}")
+            placeholder_text=f"{round(self.Z / factor, 2)}")
         self.L_slider_entry.configure(
-            placeholder_text=f"{round(self.L / factor, 4)}")
+            placeholder_text=f"{round(self.L / factor, 2)}")
         self.r_slider_entry.configure(
-            placeholder_text=f"{round(self.r / factor, 4)}")
+            placeholder_text=f"{round(self.r / factor, 2)}")
         # Magnification stays unit-free (ratio)
         self.scale_factor = self.L / self.Z if self.Z != 0 else self.L / MIN_DISTANCE
         if hasattr(self, "magnification_label"):
@@ -2128,6 +2128,9 @@ class App(ctk.CTk):
 
         self.update_parameters()
         self._schedule_reconstruction()
+        self.L_slider.set(self.L)
+        self.Z_slider.set(self.Z)
+        self.r_slider.set(self.r)
 
     def _downsample_hologram(self, holo_u8: np.ndarray) -> tuple[np.ndarray, float]:
         if self.DOWNSAMPLE_FACTOR <= 1:
@@ -2189,6 +2192,9 @@ class App(ctk.CTk):
             self.r = self.L - self.Z
         self.update_parameters()
         self._schedule_reconstruction()
+        self.L_slider.set(self.L)
+        self.Z_slider.set(self.Z)
+        self.r_slider.set(self.r)
 
     def update_r(self, val):
         '''Updates the value of r based on the slider'''
@@ -2202,6 +2208,9 @@ class App(ctk.CTk):
 
         self.update_parameters()
         self._schedule_reconstruction()
+        self.L_slider.set(self.L)
+        self.Z_slider.set(self.Z)
+        self.r_slider.set(self.r)
 
     def set_value_L(self) -> None:
         raw = self.L_slider_entry.get().strip()
