@@ -60,6 +60,8 @@ def create_propagate_panel(parent, attr_prefix="propagation", on_slider_change=N
     parent.grid_propagate(False)
     for col in range(4):
         parent.columnconfigure(col, weight=1)
+    parent.grid_columnconfigure(2, weight=1, minsize=110)
+    parent.grid_columnconfigure(3, weight=1, minsize=110)
 
     # Title
     ctk.CTkLabel(parent, text="Propagation", font=ctk.CTkFont(weight="bold"))\
@@ -128,7 +130,8 @@ def create_propagate_panel(parent, attr_prefix="propagation", on_slider_change=N
         previous_unit["val"] = new_unit
 
         # Update visible labels
-        dist_labels["distance"].configure(text=f"Distance ({new_unit})")
+        name = "Distance" if prop_mode_var.get() == "fixed" else "Step"
+        dist_labels["distance"].configure(text=f"{name} ({new_unit})")
         dist_labels["min"].configure(text=f"Min. ({new_unit})")
         dist_labels["max"].configure(text=f"Max. ({new_unit})")
         current_value_label.configure(text=f"{propagate_slider.get():.1f} {new_unit}")
@@ -158,14 +161,32 @@ def create_propagate_panel(parent, attr_prefix="propagation", on_slider_change=N
         if isinstance(widget, ctk.CTkEntry):
             widget.configure(text_color=("black", "white") if enabled else "gray50")
 
+    # Helper to show/hide without losing the position in the grid
+    def _show(widget, show=True):
+        if not widget: return
+        (widget.grid() if show else widget.grid_remove())
+
     def update_visibility(*_):
         mode = prop_mode_var.get()
-        set_widget_state(fixed_distance_entry, mode == "fixed")
+
+        # Enable/Disable entries according to mode
+        set_widget_state(fixed_distance_entry, mode in ("fixed", "sweep", "auto"))
         set_widget_state(min_entry, mode in ("sweep", "auto"))
         set_widget_state(max_entry, mode in ("sweep", "auto"))
-        propagate_slider.configure(state="normal" if mode == "sweep" else "disabled")
 
-        # Update slider range
+        fixed_distance_entry.configure(placeholder_text=("0.0" if mode == "fixed" else "step"))
+
+        # Show/Hide Min/Max only on fixed
+        only_distance = (mode == "fixed")
+        _show(dist_labels["min"], not only_distance)
+        _show(dist_labels["max"], not only_distance)
+        _show(min_entry, not only_distance)
+        _show(max_entry, not only_distance)
+
+        # Slider active only in sweep
+        propagate_slider.configure(state=("normal" if mode == "sweep" else "disabled"))
+
+        # Adjust slider range when applicable
         if mode == "sweep":
             try:
                 min_val = float(min_entry.get())
@@ -174,6 +195,9 @@ def create_propagate_panel(parent, attr_prefix="propagation", on_slider_change=N
                     propagate_slider.configure(from_=min_val, to=max_val)
             except ValueError:
                 pass
+
+        name = "Distance" if mode == "fixed" else "Step"
+        dist_labels["distance"].configure(text=f"{name} ({unit_var.get()})")
 
     prop_mode_var.trace_add("write", update_visibility)
     update_visibility()
@@ -219,7 +243,6 @@ def create_propagate_panel(parent, attr_prefix="propagation", on_slider_change=N
     }
 
 
-
 # Toolbar panel
 def build_toolbar(app):
     """
@@ -254,7 +277,7 @@ def build_toolbar(app):
 
     # Save
     app.save_menu = ctk.CTkOptionMenu(
-        app.toolbar_frame, values=["Save Hologram", "Save FT", "Save Phase", "Save Amplitude"],
+        app.toolbar_frame, values=["Save FT", "Save Phase", "Save Amplitude"],
         command=app._on_save_select, width=100, corner_radius=5
     )
     app.save_menu.grid(row=0, column=2, padx=3, sticky="ew")
@@ -278,6 +301,7 @@ def build_toolbar(app):
     )
     app.theme_menu.grid(row=0, column=5, padx=3, sticky="ew")
     app.theme_menu.set("Theme")
+
 
 # Views panels for hologram/fft and Phase/Amplitude
 def build_two_views_panel(app):
@@ -1043,4 +1067,3 @@ def init_speckles_frame(self):
         width=100,
         command=lambda: tGUI.apply_speckle_comparison(self)
     ).grid(row=11, column=1, padx=0, pady=5, sticky="w")
-

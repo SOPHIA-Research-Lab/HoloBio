@@ -7,6 +7,9 @@ from tkinter import filedialog, messagebox
 from importlib import import_module, reload
 import cv2
 import matplotlib.pyplot as plt
+from settingsCompensation import create_compensation_settings
+from pyDHM_methods import angularSpectrum, fresnel
+
 
 # Third-Party Libraries
 import customtkinter as ctk
@@ -465,12 +468,27 @@ class App(ctk.CTk):
         # Keep the placeholder text fixed to “Load”
         self.load_menu.set("Load")
 
+    def _reset_left_view_to_hologram(self):
+        """Force the left view back to 'Hologram' and clean up FT stuff."""
+        # Radio button state
+        self.holo_view_var.set("Hologram")
+        try:
+            self.radio_holo.select()
+        except Exception:
+            pass
+
+        if hasattr(self, "ft_coord_label"):
+            self.ft_coord_label.place_forget()
+        if hasattr(self, "captured_label"):
+            self.captured_label.unbind("<Motion>")
+            self.captured_label.unbind("<Leave>")
+
+        # Refresh view
+        self.update_left_view()
+
     def _refresh_all_ft_views(self) -> None:
         """
         Rebuild every cached FT view (numpy array + Tk thumbnail) to honour the
-        *current* value stored in ``self.ft_mode_var`` (“With logarithmic… /
-        Without logarithmic…”).  After regenerating the caches, the method also
-        repaints the left viewer if it is showing a Fourier-Transform.
         """
         if not hasattr(self, "ft_frames"):
             self.ft_frames = []
@@ -515,6 +533,26 @@ class App(ctk.CTk):
             except Exception:
                 pass
         self._refresh_all_ft_views()
+
+    def _reset_recon_panel(self):
+        """Clear right-view state so a new hologram starts with an empty reconstruction."""
+        # Clean all arrays
+        self.phase_arrays = []
+        self.amplitude_arrays = []
+        self.phase_frames = []
+        self.amplitude_frames = []
+
+        # index
+        self.current_phase_index = 0
+        self.current_amp_index = 0
+        self.recon_view_var.set("Phase Reconstruction ")
+
+        if hasattr(self, "processed_title_label"):
+            self.processed_title_label.configure(text="Phase Reconstruction ")
+        if hasattr(self, "processed_label"):
+            self.processed_label.configure(image=self.img_black)
+            self.processed_label.image = self.img_black
+
 
     def _show_amp_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
@@ -909,7 +947,10 @@ class App(ctk.CTk):
         self.hide_holo_arrows()
         print(f"Hologram loaded from: {holo_path}")
 
-    # ──────────────────────────────
+        self._reset_left_view_to_hologram()
+        self._reset_recon_panel()
+
+        # ──────────────────────────────
     # Load images for phase shifting method
     # ──────────────────────────────
     def load_images(self):
@@ -983,7 +1024,8 @@ class App(ctk.CTk):
             self.amplitude_frames.append(self._preserve_aspect_ratio_right(amp_pil))
             self.phase_frames.append(self._preserve_aspect_ratio_right(phs_pil))
 
-        print(f"Loaded {len(file_paths)} hologram(s).")
+        self._reset_left_view_to_hologram()
+        self._reset_recon_panel()
 
     # ────────────────────────────────────────────────────────────
     # Load generic image for numerical propagation
@@ -1028,6 +1070,9 @@ class App(ctk.CTk):
             self.captured_label.configure(image=tk_ft)
 
         self.hide_holo_arrows()
+
+        self._reset_left_view_to_hologram()
+        self._reset_recon_panel()
 
     def show_save_options(self):
         """
@@ -1829,7 +1874,18 @@ class App(ctk.CTk):
             text='Choose a Compensation Method',
             font=ctk.CTkFont(weight="bold")
         )
-        self.pc_method_label.grid(row=0, column=0, columnspan=2, padx=5, pady=(5, 10), sticky='w')
+        self.pc_method_label.grid(row=0, column=0, padx=5, pady=(5, 10), sticky='w')
+
+        # Settings button to compensation methods
+        self.pc_settings_button = ctk.CTkButton(
+            self.pc_method_frame,
+            text="⚙",
+            width=30,
+            height=30,
+            font=ctk.CTkFont(size=16),
+            command=self.open_compensation_settings
+        )
+        self.pc_settings_button.grid(row=0, column=1, padx=5, pady=(5, 10), sticky='e')
 
         # variable to save the selection
         self.pc_method_var = ctk.IntVar(value=0)
@@ -1867,6 +1923,7 @@ class App(ctk.CTk):
         )
         self.params_pc_frame.grid(row=2, column=0, sticky='ew', pady=2)
         self.params_pc_frame.grid_propagate(True)
+
         for col in range(3):
             self.params_pc_frame.columnconfigure(col, weight=1)
 
@@ -2033,6 +2090,10 @@ class App(ctk.CTk):
         # Update canvas scroll region based on current content
         self.phase_compensation_inner_frame.update_idletasks()
         self.pc_canvas.config(scrollregion=self.pc_canvas.bbox("all"))
+
+    def open_compensation_settings(self):
+        print("Opening compensation settings panel...")
+        create_compensation_settings(self)
 
     def _on_filter_section_changed(self, *_):
         """
@@ -2238,7 +2299,7 @@ class App(ctk.CTk):
             self.magnification = 1.0
             M = self.magnification
 
-        # Scale factor for the magnification
+        # Scale factor for the axial magnification
         scale_img = M ** 2
 
         # Mode sweep
@@ -2246,29 +2307,34 @@ class App(ctk.CTk):
             try:
                 min_val = float(widgets["propagation_min_entry"].get())
                 max_val = float(widgets["propagation_max_entry"].get())
+                step_val = float(widgets["propagation_fixed_distance"].get())
                 scale = unit_scales[unit]
 
                 # unit at microns and image plane
                 min_val_um = min_val * scale * scale_img
                 max_val_um = max_val * scale * scale_img
+                step_um = step_val * scale * scale_img
             except ValueError:
-                messagebox.showinfo(
-                    "Information",
-                    "Please enter a valid min or max value."
-                )
+                messagebox.showinfo("Information", "Please enter a valid min or max value.")
                 return
 
             if min_val_um >= max_val_um:
                 messagebox.showinfo(
-                    "Information",
-                    "Minimum must be less than maximum."
-                )
+                    "Information", "Minimum must be less than maximum.")
+                return
+            if step_um <= 0:
+                messagebox.showinfo("Information", "Step must be positive.")
+                return
+            if not (min_val_um < step_um < max_val_um):
+                messagebox.showinfo("Information", "Step must be between minimum and maximum values.")
                 return
 
             slider = widgets["propagation_slider"]
             slider.configure(from_=min_val_um, to=max_val_um)
-            slider.set(min_val_um)
 
+            nsteps = max(1, int(round((max_val_um - min_val_um) / step_um)))
+            slider.configure(number_of_steps=nsteps)
+            slider.set(min_val_um)
             self._propagate_current_field(min_val_um)
 
         # Mode fixed
@@ -2315,9 +2381,7 @@ class App(ctk.CTk):
 
             if not roi_coords:
                 messagebox.showinfo(
-                    "Information",
-                    "No ROI selected. Autofocus cancelled.."
-                )
+                    "Information", "No ROI selected. Autofocus cancelled..")
                 return
 
             roi = roi_coords['x1'], roi_coords['y1'], roi_coords['x2'], roi_coords['y2']
@@ -2328,9 +2392,25 @@ class App(ctk.CTk):
                 try:
                     z_min = float(widgets["propagation_min_entry"].get())
                     z_max = float(widgets["propagation_max_entry"].get())
+                    step_val = float(widgets["propagation_fixed_distance"].get())
                     scale = unit_scales[unit]
+
                     z_min_um = z_min * scale * scale_img
                     z_max_um = z_max * scale * scale_img
+                    step_um = step_val * scale * scale_img
+
+                    if z_min_um >= z_max_um:
+                        self._close_autofocus_progress()
+                        messagebox.showinfo("Information", "Minimum must be less than maximum.")
+                        return
+                    if step_um <= 0:
+                        self._close_autofocus_progress()
+                        messagebox.showinfo("Information", "Step must be positive.")
+                        return
+                    if not (z_max_um - z_min_um >= step_um):
+                        self._close_autofocus_progress()
+                        messagebox.showinfo("Information", "Step must be smaller than the sweep range.")
+                        return
 
                     metric_name = widgets["propagation_metric_var"].get()
                     if metric_name == "Normalized Variance":
@@ -2350,7 +2430,7 @@ class App(ctk.CTk):
                         wavelength=self.wavelength,
                         dx=self.dx,
                         dy=self.dy,
-                        steps=20,
+                        step_um=step_um,
                         metric_fn=metric_fn,
                         progress_callback=self._update_autofocus_progress,
                         plot_results=False,
@@ -2554,6 +2634,30 @@ class App(ctk.CTk):
         self.pitch_x = dx_um
         self.pitch_y = dy_um
 
+    def open_compensation_settings(self):
+        data = create_compensation_settings(
+            parent=self,
+            init_semi_s=getattr(self, "size_search", 5),
+            init_semi_step=getattr(self, "step_value", 0.2),
+            init_tudhm_step=getattr(self, "tudhm_step", 0.2),
+            init_tudhm_method=getattr(self, "optimizer_method", "TNC"),
+            init_limit=getattr(self, "vl_limit", "256"),
+            init_piston=getattr(self, "vl_piston", True),
+            init_pca=getattr(self, "vl_pca", False),
+        )
+        if data is None:
+            return
+
+        # Persist selections for later use
+        self.size_search = data["semi"]["s"]
+        self.step_value = data["semi"]["step"]
+        self.tudhm_step = data["tudhm"]["step"]
+        self.optimizer_method = data["tudhm"]["method"]
+        self.vl_limit = data["vortex_legendre"]["limit"]
+        self.vl_piston = data["vortex_legendre"]["piston"]
+        self.vl_pca = data["vortex_legendre"]["pca"]
+
+
     def run_phase_compensation(self):
         self.compensation_source = "pc"
 
@@ -2630,8 +2734,7 @@ class App(ctk.CTk):
             self.manual_coords = self._prompt_rectangle_coordinates(title="Non-telecentric filter")
             if self.manual_coords is None:
                 messagebox.showinfo(
-                    "Information",
-                    "UUser cancelled non-telecentric coordinate input."
+                    "Information", "User cancelled non-telecentric coordinate input."
                 )
                 return
 
@@ -2652,22 +2755,26 @@ class App(ctk.CTk):
         method = self.pc_method_var.get()
         if method == 0:
             comp_output = pyDHM.ERS(inp=self.arr_hologram, wavelength=self.wavelength, dx=self.dx,
-                                    dy=self.dy, s=5, step=0.2, filter_type=self.spatial_filter_var_pc.get(),
+                                    dy=self.dy, s=getattr(self, "size_search", 5), step=getattr(self, "step_value", 0.2), filter_type=self.spatial_filter_var_pc.get(),
                                     manual_coords=self.manual_coords,
                                     filtering_function=self.custom_filtering_function)
         elif method == 1:
             comp_output = pyDHM.CFS(inp=self.arr_hologram, wavelength=self.wavelength, dx=self.dx,
                                     dy=self.dy, filter_type=self.spatial_filter_var_pc.get(),
                                     manual_coords=self.manual_coords,
-                                    spatial_filtering_fn=self.custom_filtering_function)
+                                    spatial_filtering_fn=self.custom_filtering_function, step=getattr(self, "tudhm_step", 2.0),
+                                    optimizer=getattr(self, "optimizer_method", "TNC"))
         elif method == 2:
             chosen_filter = self.spatial_filter_var_pc.get()
             comp_output = self.CNT(self.arr_hologram, self.wavelength, self.dx, self.dy, chosen_filter)
         elif method == 3:
             comp_output = pyDHM.vortexLegendre(inp=self.arr_hologram, wavelength=self.wavelength, dx=self.dx,
-                                               dy=self.dy, limit=256 / 2, filter_type=self.spatial_filter_var_pc.get(),
+                                               dy=self.dy, limit=getattr(self, "vl_limit", 128), filter_type=self.spatial_filter_var_pc.get(),
                                                manual_coords=self.manual_coords,
-                                               spatial_filtering_fn=self.custom_filtering_function)
+                                               spatial_filtering_fn=self.custom_filtering_function,
+                                               piston=getattr(self, "vl_piston", False),
+                                               PCA=getattr(self, "vl_pca", True)
+                                               )
         else:
             print("Unknown phase compensation method.")
             return
@@ -2948,6 +3055,89 @@ class App(ctk.CTk):
             show_ft_and_filter=True
         )
 
+    # complex field function
+    def PhaseObject(self):
+        # Must be in "Coherent Image" mode
+        if self.np_source_var.get() != 1:
+            messagebox.showinfo("Source", "Select 'Coherent Image' first.")
+            return
+
+        # Read physical params
+        try:
+            wavelength = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)
+            pitch_x = self.get_value_in_micrometers(self.pitchx_label_np_entry.get(), self.pitch_x_unit)
+            pitch_y = self.get_value_in_micrometers(self.pitchy_label_np_entry.get(), self.pitch_y_unit)
+        except Exception:
+            messagebox.showwarning("Parameters", "Invalid wavelength / pitch values.")
+            return
+        if any(v in (None, 0) for v in (wavelength, pitch_x, pitch_y)):
+            messagebox.showwarning("Parameters", "Wavelength and pitch must be non-zero.")
+            return
+
+        # Find the already-loaded grayscale 8-bit image (try common attributes)
+        img = None
+        for cand in ("coherent_image", "generic_loaded_image", "loaded_image_np", "arr_loaded_image", "arr_hologram"):
+            if hasattr(self, cand) and getattr(self, cand) is not None:
+                img = getattr(self, cand)
+                break
+        if img is None:
+            messagebox.showinfo("Image", "Load a grayscale image before creating a Phase Object.")
+            return
+
+        import numpy as np
+        img = np.asarray(img)
+        if img.ndim != 2:
+            messagebox.showwarning("Image", "The image must be single-channel (grayscale).")
+            return
+
+        img_f = img.astype(np.float32)
+        phi = (img_f / 255.0) * (2.0 * np.pi)
+        U = np.exp(1j * phi).astype(np.complex64)
+
+        # Store for later propagation
+        self.coherent_field = U
+        self.wavelength = wavelength
+        self.dx = pitch_x
+        self.dy = pitch_y
+
+        # ---- Show on the RIGHT viewer (same pipeline as run_phase_compensation) ----
+        amp = np.abs(U)
+        raw_phase = np.angle(U)
+
+        amp_norm = (amp - amp.min()) / (amp.max() - amp.min() + 1e-9) * 255.0
+        amp_norm = amp_norm.astype(np.uint8)
+
+        phase_0to1 = (raw_phase + np.pi) / (2 * np.pi + 1e-9)
+        phase_0to1 = np.clip(phase_0to1, 0, 1)
+        phase_8bit = (phase_0to1 * 255.0).astype(np.uint8)
+
+        amp_pil = Image.fromarray(amp_norm, mode='L')
+        phs_pil = Image.fromarray(phase_8bit, mode='L')
+
+        tk_amp = self._preserve_aspect_ratio_right(amp_pil)
+        tk_phs = self._preserve_aspect_ratio_right(phs_pil)
+
+        # Store arrays & frames for your right-panel toggles
+        self.amplitude_arrays = [amp_norm]
+        self.phase_arrays = [phase_8bit]
+        self.original_amplitude_arrays = [amp_norm.copy()]
+        self.original_phase_arrays = [phase_8bit.copy()]
+        self.filter_states_dim1 = [tGUI.default_filter_state()]
+        self.filter_states_dim2 = [tGUI.default_filter_state()]
+        self.last_filter_settings = None
+        self.amplitude_frames = [tk_amp]
+        self.phase_frames = [tk_phs]
+        self.current_amp_index = 0
+        self.current_phase_index = 0
+
+        # Default to showing phase on the right
+        self.processed_label.configure(image=tk_phs)
+        self.processed_title_label.configure(text="Phase Reconstruction ")
+        self.recon_view_var.set("Phase Reconstruction ")
+        self.update_right_view()
+
+        messagebox.showinfo("Phase Object", "Pure phase field created from the image.")
+
     # Numerical Propagation
     def init_numerical_propagation_frame(self) -> None:
         self.numerical_propagation_frame = ctk.CTkFrame(self, corner_radius=8)
@@ -3102,8 +3292,8 @@ class App(ctk.CTk):
         # Add the "Apply" button that calls run_numerical_propagation
         self.apply_button_np = ctk.CTkButton(
             self.params_np_frame,
-            text="Apply",
-            command=self.run_numerical_propagation,
+            text="Phase Object",
+            command=self.PhaseObject,
             width=100,
         )
         self.apply_button_np.grid(row=3, column=0, padx=10, columnspan=3, pady=(10, 10), sticky='w')
@@ -3139,12 +3329,13 @@ class App(ctk.CTk):
         self.compensation_source = "np"
 
         self.propagate_widgets_np["propagation_apply_button"].configure(
-            command=lambda: self._apply_propagation(request_magnification=False)
+            command=lambda: self.run_numerical_propagation()
         )
 
         # final canvas refresh
         self.numerical_propagation_inner_frame.update_idletasks()
         self.numprop_canvas.config(scrollregion=self.numprop_canvas.bbox("all"))
+
 
     # Apply button in Numerical Propagation
     def run_numerical_propagation(self):
@@ -3169,8 +3360,6 @@ class App(ctk.CTk):
             self._apply_propagation()
 
         elif source == 1:
-            print("[DEBUG] Working with coherent image")
-
             if (
                     not hasattr(self, "coherent_input_image") or
                     self.coherent_input_image is None or
@@ -3185,7 +3374,7 @@ class App(ctk.CTk):
                 return
 
             self._load_and_display_coherent_image()
-            self._apply_propagation(request_magnification=True)
+            self._apply_propagation(request_magnification=False)
 
         try:
             w_val = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)
@@ -3210,6 +3399,7 @@ class App(ctk.CTk):
             )
             return
 
+
     # Check the radio button options for Numerical Propagation
     def on_np_source_changed(self, *_):
         selected = self.np_source_var.get()
@@ -3222,15 +3412,14 @@ class App(ctk.CTk):
 
     # Load and Display for coherent Image
     def _load_and_display_coherent_image(self):
-        """Load a coherent image, convert it to complex field, and update both GUI panels."""
-        field = pyDHM.convert_loaded_image_to_field(self)
-
-        if field is None:
-            print("No coherent image loaded or conversion failed.")
+        """Load a coherent image and update ONLY the left GUI panel (image + FT)."""
+        # Expect your raw 8-bit grayscale in self.coherent_input_image
+        if (
+                not hasattr(self, "coherent_input_image") or
+                self.coherent_input_image is None
+        ):
+            print("No coherent image loaded.")
             return
-
-        self.coherent_field_complex = field  # Optional: keep for reuse
-        self.compensated_field_complex = field
 
         img_uint8 = np.asarray(self.coherent_input_image)
 
@@ -3258,30 +3447,6 @@ class App(ctk.CTk):
             self.captured_label.configure(image=tk_ft)
 
         self.hide_holo_arrows()
-
-        # Right panel: amplitude
-        amp = np.abs(field)
-        amp8 = ((amp - amp.min()) / (np.ptp(amp) + 1e-9) * 255).astype(np.uint8)
-        phs = np.angle(field)
-        phs8 = (((phs + np.pi) / (2 * np.pi)) * 255).astype(np.uint8)
-
-        self.amplitude_arrays = [amp8]
-        self.phase_arrays = [phs8]
-        self.original_amplitude_arrays = [amp8.copy()]
-        self.original_phase_arrays = [phs8.copy()]
-
-        tk_amp = self._preserve_aspect_ratio_right(Image.fromarray(amp8))
-        if not hasattr(self, "amplitude_frames"):
-            self.amplitude_frames = []
-
-        if len(self.amplitude_frames) == 0:
-            self.amplitude_frames.append(tk_amp)
-        else:
-            self.amplitude_frames[0] = tk_amp
-
-        self.processed_label.configure(image=tk_amp)
-        self.processed_label.image = tk_amp
-        self.processed_title_label.configure(text="Amplitude – Coherent Image")
 
     # propagation parameters
     def update_propagation_params(self, *args):

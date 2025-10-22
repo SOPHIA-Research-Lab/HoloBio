@@ -13,6 +13,7 @@ from skimage.restoration import unwrap_phase
 from scipy.sparse.linalg import svds
 from scipy.interpolate import RegularGridInterpolator
 from tkinter import messagebox
+import unwrapping as uw
 
 
 # ─────────────────────────────────────────────
@@ -173,30 +174,12 @@ def costFunction(seeds, height, width, holo_filter, wavelength, dxy, Y, X, fy_0,
 # ─────────────────────────────────────────────
 # CFS Search, from pyDHM library
 # ─────────────────────────────────────────────
-def CFS(inp, wavelength, dx, dy, filter_type, manual_coords=None, spatial_filtering_fn=None):
+def CFS(inp, wavelength, dx, dy, filter_type, manual_coords=None, spatial_filtering_fn=None, step=2,
+                                    optimizer='TNC'):
     """
     CFS form pyDHM with cost-function improve version.
-
-    Parameters:
-    -----------
-    inp : ndarray
-        Input hologram (real or complex).
-    wavelength : float
-        Wavelength in micrometers.
-    dx, dy : float
-        Pixel pitch in micrometers.
-    filter_type : str
-        Type of spatial filter to apply.
-    manual_coords : tuple or None
-        Manual coordinates for filtering.
-    spatial_filtering_fn : callable
-        Function to apply spatial filtering. Must return (filtered_field, fy, fx).
-
-    Returns:
-    --------
-    comp_phase : ndarray
-        Phase-compensated complex field.
     """
+
     inp = np.asarray(inp, dtype=np.float32)
     height, width = inp.shape
     y = np.arange(height)
@@ -220,8 +203,6 @@ def CFS(inp, wavelength, dx, dy, filter_type, manual_coords=None, spatial_filter
     fy_seed = float(fy_seed[0])
     fx_seed = float(fx_seed[0])
 
-    # print("CFS (TU-DHM): cost-function optimisation …")
-    step = 2
     bounds = ((fy_seed - step, fy_seed + step),
               (fx_seed - step, fx_seed + step))
 
@@ -231,12 +212,11 @@ def CFS(inp, wavelength, dx, dy, filter_type, manual_coords=None, spatial_filter
             dxy, Y, X, fy_0, fx_0, k
         ),
         x0=[fy_seed, fx_seed],
-        method="TNC",
+        method=optimizer,
         bounds=bounds,
         tol=1e-3
     )
     fy_best, fx_best = res.x
-    # print(f"   → optimal   fy={fy_best:.3f}   fx={fx_best:.3f}")
 
     theta_x = math.asin((fx_0 - fx_best) * wavelength / (width * dx))
     theta_y = math.asin((fy_0 - fy_best) * wavelength / (height * dy))
@@ -290,7 +270,6 @@ def spatialFilteringCF(field, height, width, filter_type="Circular", manual_coor
 
     # Hologram Fourier Transform
     ft = np.fft.fftshift(np.fft.fft2(field))
-    ft[0:5,0:5]=0
 
     # Remueve el DC centrado correctamente
     center_x, center_y = width // 2, height // 2
@@ -392,7 +371,8 @@ def spatialFilteringCF(field, height, width, filter_type="Circular", manual_coor
 # ─────────────────────────────────────────────
 # Vortex + Legendre
 # ─────────────────────────────────────────────
-def vortexLegendre(inp, wavelength, dx, dy, limit, filter_type, manual_coords=None, spatial_filtering_fn=None):
+def vortexLegendre(inp, wavelength, dx, dy, limit, filter_type, manual_coords=None, spatial_filtering_fn=None,
+                   piston=False, PCA=True):
     # Cut hologram (M x N) to (M x M)
     hologram = np.array(inp)
     if hologram.shape[1] != hologram.shape[0]:
@@ -428,15 +408,8 @@ def vortexLegendre(inp, wavelength, dx, dy, limit, filter_type, manual_coords=No
 
     # Apply median filter
     medFilt = 3
-    #ft_holo_filtered = fftshift(fft2(fftshift(holo_filter)))
-    """ 
-    ft_holo_filtered = np.fft.fftshift(np.fft.fft2(holo_filter))
-    field_real = median_filter(np.real(ft_holo_filtered), size=(medFilt, medFilt), mode='reflect')
-    field_imag = median_filter(np.imag(ft_holo_filtered), size=(medFilt, medFilt), mode='reflect')
-    field_filtered = field_real + 1j * field_imag
-    """
-    # Filter hologram
 
+    # Filter hologram
     ft_holo_filtered = 10 * np.log10(np.abs((np.fft.fftshift(np.fft.fft2(np.fft.fftshift(holo_filter))))+1e-6) ** 2)
     field_filtered = median_filter(ft_holo_filtered, size=(medFilt, medFilt), mode='reflect')
 
@@ -453,42 +426,41 @@ def vortexLegendre(inp, wavelength, dx, dy, limit, filter_type, manual_coords=No
     # ---------------------------------------------------------------------------------------------------------
     # ------------------------------ Legendre ------------------------------------------------------------------
     # ---------------------------------------------------------------------------------------------------------
-    NoPistonCompensation = False
-    UsePCA = True
-    limit=256/2
+    #NoPistonCompensation = False
+    #UsePCA = True
+    #limit=256/2
     phase_corrected, legendre_coefficients = legendre_compensation(
-        obj_complex_VL, limit, NoPistonCompensation, UsePCA)
+        obj_complex_VL, limit, piston, PCA)
     #imageShow(np.angle(phase_corrected), 'Phase + Vortex + Legendre')
-    # print("Total Legendre coefficients:", len(legendre_coefficients))
 
-    # 1. Normalized grid preparation
+    # Normalized grid preparation
     gridSize = obj_complex_VL.shape[0]
     coords = np.linspace(-1, 1 - 2 / gridSize, gridSize)
     X, Y = np.meshgrid(coords, coords)
     dA = (2 / gridSize) ** 2
 
-    # 2. Legendre basis (using orders 2 to 6, as in MATLAB)
+    # Legendre basis (using orders 2 to 6, as in MATLAB)
     order = np.arange(2, 7)  # equivalent to 2:6
     polynomials = square_legendre_fitting(order, X, Y)
 
     ny, nx, n_polys = polynomials.shape
     Legendres = polynomials.reshape(ny * nx, n_polys)
 
-    # 3. Inner product for orthonormalization
+    # Inner product for orthonormalization
     zProds = Legendres.T @ Legendres * dA
     Legendres = Legendres / np.sqrt(np.diag(zProds))
 
-    # 4. Normalization constants
+    # Normalization constants
     Legendres_norm_const = np.sum(Legendres ** 2, axis=0) * dA
 
-    # 5. Projection (using coefficients 2 to 6)
+    # Projection (using coefficients 2 to 6)
     coeffs = legendre_coefficients[1:len(order) + 1] / np.sqrt(Legendres_norm_const[:len(order)])
     WavefrontReconstructed_Vect = np.sum(coeffs[np.newaxis, :] * Legendres[:, :len(order)], axis=1)
 
-    # 6. Wavefront reconstruction
+    # Wavefront reconstruction
     WavefrontReconstructed = WavefrontReconstructed_Vect.reshape(ny, nx)
 
-    # 7. Phase compensation
+    # Phase compensation
     compensatedHologram = np.abs(obj_complex_VL) * (
                 np.exp(1j * np.angle(obj_complex_VL)) / np.exp(1j * WavefrontReconstructed))
 
@@ -698,6 +670,43 @@ def draw_manual_rectangle(current_ft_array=None, arr_ft=None, arr_hologram=None)
 
 
 # ─────────────────────────────────────────────
+# Fresnel propagator
+# ─────────────────────────────────────────────
+def fresnel(field, z, wavelength, dx, dy):
+    """
+    # Function to diffract a complex field using Fresnel approximation with Fourier method
+    # Inputs:
+    # field - complex field
+    # z - propagation distance
+    # wavelength - wavelength
+    # dx, dy - sampling pitches
+    """
+
+    field = np.array(field)
+    M, N = field.shape
+    x = np.arange(0, N, 1)  # array x
+    y = np.arange(0, M, 1)  # array y
+    X, Y = np.meshgrid(x - (N / 2), y - (M / 2), indexing='xy')
+
+    dxout = (wavelength * z) / (M * dx)
+    dyout = (wavelength * z) / (N * dy)
+
+    z_phase = np.exp(1j * 2 * pi * z / wavelength) / (1j * wavelength * z)
+
+    out_phase = np.exp((1j * pi / (wavelength * z)) * (np.power(X * dxout, 2) + np.power(Y * dyout, 2)))
+    in_phase = np.exp((1j * pi / (wavelength * z)) * (np.power(X * dx, 2) + np.power(Y * dy, 2)))
+
+    tmp = (field * in_phase)
+    tmp = np.fft.fftshift(tmp)
+    tmp = np.fft.fft2(tmp)
+    tmp = np.fft.fftshift(tmp)
+
+    out = z_phase * out_phase * dx * dy * tmp
+
+    return out
+
+
+# ─────────────────────────────────────────────
 # Angular spectrum propagator
 # ─────────────────────────────────────────────
 def angularSpectrum(field, z, wavelength, dx, dy):
@@ -800,34 +809,11 @@ def metric_nv(amplitude):
 # ─────────────────────────────────────────────
 # Autofocus block
 # ─────────────────────────────────────────────
-def autofocus_field(field, z_range, wavelength, dx, dy, steps=50, metric_fn=None,
+def autofocus_field(field, z_range, wavelength, dx, dy, steps=50, step_um=None, metric_fn=None,
                     progress_callback=None, plot_results=False, roi=None):
     """
     Performs autofocus by sweeping through a range of distances and selecting the one
     that yields the maximum sharpness according to the provided metric.
-
-    Parameters:
-        field : ndarray
-            Complex field to be propagated.
-        z_range : tuple(float, float)
-            The (z_min, z_max) propagation range in micrometers.
-        wavelength : float
-            Wavelength in micrometers.
-        dx, dy : float
-            Pixel pitch in micrometers.
-        steps : int
-            Number of propagation steps to evaluate.
-        metric_fn : callable
-            Sharpness metric function (e.g., NV, Tenengrad).
-        progress_callback : callable or None
-            Optional function to report progress (e.g., to a progress bar).
-        plot_results : bool
-            Whether to plot the sharpness metric curve after autofocus.
-
-    Returns:
-        best_z : float - optimal propagation distance (µm)
-        z_vals : list - propagation distances (µm)
-        scores : list - sharpness scores per distance
     """
     if field is None:
         messagebox.showinfo(
@@ -845,7 +831,16 @@ def autofocus_field(field, z_range, wavelength, dx, dy, steps=50, metric_fn=None
         )
         return None
 
-    z_vals = np.linspace(z_min, z_max, steps)
+    if step_um is not None and step_um > 0:
+        # include endpoint with small epsilon to avoid float truncation
+        z_vals = np.arange(z_min, z_max + 0.5 * step_um, step_um)
+        if z_vals.size == 0:
+            messagebox.showinfo("Information", "Step too large for the given range.")
+            return None
+    else:
+        # fallback steps number steps
+        z_vals = np.linspace(z_min, z_max, steps)
+
     scores = []
 
     best_z = z_vals[0]
@@ -1048,7 +1043,7 @@ def reference_wave(fx_max, fy_max, m, n, _lambda, dx, dy, k, fx_0, fy_0, M, N):
     return ref_wave
 
 
-def legendre_compensation(field_compensate, limit, NoPistonCompensation=True, UsePCA=False):
+def legendre_compensation(field_compensate, limit, piston=True, PCA=False):
     """
     Compensates the phase of a complex field using a fit with Legendre polynomials.
 
@@ -1086,12 +1081,14 @@ def legendre_compensation(field_compensate, limit, NoPistonCompensation=True, Us
     square = np.fft.ifft2(np.fft.ifftshift(fftField))
 
     # Extract dominant wavefront
-    if UsePCA:
+    if PCA:
         u, s, vt = svds(square, k=1, which='LM')
         dominant = u[:, :1] @ np.diag(s[:1]) @ vt[:1, :]
-        dominant = unwrap_phase(np.angle(dominant))
+        #dominant = unwrap_phase(np.angle(dominant))
+        dominant = uw.phase_unwrap(np.angle(dominant))
     else:
-        dominant = unwrap_phase(np.angle(square))
+        #dominant = unwrap_phase(np.angle(square))
+        dominant = uw.phase_unwrap(np.angle(square))
 
     # Normalized spatial grid
     gridSize = dominant.shape[0]
@@ -1115,10 +1112,12 @@ def legendre_compensation(field_compensate, limit, NoPistonCompensation=True, Us
     # Projection onto Legendre basis
     Legendre_Coefficients = np.sum(Legendres * phaseVector, axis=0) * dA
 
-    if NoPistonCompensation:
-        # Piston compensation disabled
-        # Optionally skip the first coefficient in the reconstruction
-        pass
+    if piston:
+        # Remove piston: set the constant term to zero and reconstruct
+        coeffs_used = Legendre_Coefficients.copy()
+        coeffs_used[0] = 0.0
+        coeffs_norm = coeffs_used / np.sqrt(Legendres_norm_const)
+        wavefront = np.sum(coeffs_norm[:, np.newaxis] * Legendres.T, axis=0)
     else:
         # Search for the optimal piston value
         values = np.arange(-np.pi, np.pi + np.pi / 6, np.pi / 6)
