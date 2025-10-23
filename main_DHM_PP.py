@@ -8,7 +8,7 @@ from importlib import import_module, reload
 import cv2
 import matplotlib.pyplot as plt
 from settingsCompensation import create_compensation_settings
-from pyDHM_methods import angularSpectrum, fresnel
+from unwrap_methods import apply_unwrap
 
 
 # Third-Party Libraries
@@ -129,6 +129,8 @@ class App(ctk.CTk):
         self.img_ft._size = (self.width * self.scale, self.height * self.scale)
         self.img_amplitude._size = (self.width * self.scale, self.height * self.scale)
         self.img_black._size = (self.width * self.scale, self.height * self.scale)
+
+        self.unwrap_method_var = tk.StringVar(value="None")
 
         self.holo_views = [
             ("Hologram", self.img_hologram),
@@ -553,7 +555,6 @@ class App(ctk.CTk):
             self.processed_label.configure(image=self.img_black)
             self.processed_label.image = self.img_black
 
-
     def _show_amp_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
         opts = ["Amplitude", "Intensities"]
@@ -568,6 +569,23 @@ class App(ctk.CTk):
 
     def _on_amp_mode_changed(self):
         if self.recon_view_var.get() == "Amplitude Reconstruction ":
+            self.update_right_view()
+
+    def _show_unwrap_mode_menu(self):
+        """Dropdown menu for phase unwrapping options."""
+        menu = tk.Menu(self, tearoff=0)
+        opts = ["WPhU", "Skimage Unwrap", "Original"]
+        for opt in opts:
+            menu.add_radiobutton(
+                label=opt, value=opt,
+                variable=self.unwrap_method_var,
+                command=self._on_unwrap_mode_changed
+            )
+        menu.tk_popup(self.unwrap_mode_button.winfo_rootx(),
+                      self.unwrap_mode_button.winfo_rooty() + self.unwrap_mode_button.winfo_height())
+
+    def _on_unwrap_mode_changed(self):
+        if self.recon_view_var.get() == "Phase Reconstruction ":
             self.update_right_view()
 
     def _init_ft_defaults(self):
@@ -705,19 +723,58 @@ class App(ctk.CTk):
     # ------------------- RIGHT-VIEW UPDATE (MOD) ---------------------- #
     def update_right_view(self):
         choice = self.recon_view_var.get()
+
         if choice == "Phase Reconstruction ":
-            # Unchanged original phase branch
-            if hasattr(self, 'phase_frames') and self.phase_frames:
+            if hasattr(self, 'phase_arrays') and self.phase_arrays:
                 idx = getattr(self, 'current_phase_index', 0)
-                self.processed_label.configure(image=self.phase_frames[idx])
-                self.processed_label.image = self.phase_frames[idx]
+                method = self.unwrap_method_var.get()
+
+                if method == "Original":
+
+                    if hasattr(self, 'phase_frames') and self.phase_frames:
+                        self.processed_label.configure(image=self.phase_frames[idx])
+                        self.processed_label.image = self.phase_frames[idx]
+                    else:
+                        self.processed_label.configure(image=self.img_black)
+                    self.processed_title_label.configure(text="Phase Reconstruction ")
+                else:
+                    # Unwrapping
+                    key = (idx, method)
+                    if not hasattr(self, "_unwrap_cache"):
+                        self._unwrap_cache = {}
+
+                    if key in self._unwrap_cache:
+                        tk_phs = self._unwrap_cache[key]
+                    else:
+                        # uint8
+                        src_u8 = self.phase_arrays[idx]
+                        # apply_unwrap
+                        phase_radians = apply_unwrap(src_u8, method)
+
+                        # Scale
+                        p_min, p_max = float(phase_radians.min()), float(phase_radians.max())
+                        if abs(p_max - p_min) < 1e-12:
+                            phase_0to1 = np.zeros_like(phase_radians, dtype=np.float32)
+                        else:
+                            phase_0to1 = (phase_radians - p_min) / (p_max - p_min + 1e-12)
+                        phase_8bit = (np.clip(phase_0to1, 0, 1) * 255).astype(np.uint8)
+
+                        tk_phs = self._preserve_aspect_ratio_right(Image.fromarray(phase_8bit, mode='L'))
+                        self._unwrap_cache[key] = tk_phs
+
+                    self.processed_label.configure(image=tk_phs)
+                    self.processed_label.image = tk_phs
+                    self.processed_title_label.configure(text=f"Phase Reconstruction (Unwrapped: {method})")
             else:
                 self.processed_label.configure(image=self.img_black)
+                self.processed_title_label.configure(text="Phase Reconstruction ")
+
             self.dimensions_var.set(2)
             if hasattr(self, 'current_phase_index'):
                 tGUI.load_ui_from_filter_state(self, dimension=2, index=self.current_phase_index)
 
-        else:  # Amplitude
+        else:
+            # Amplitude/Intensities
             if hasattr(self, 'amplitude_arrays') and self.amplitude_arrays:
                 idx = getattr(self, 'current_amp_index', 0)
                 if self.amp_mode_var.get() == "Amplitude":
@@ -732,6 +789,7 @@ class App(ctk.CTk):
             else:
                 self.processed_label.configure(image=self.img_black)
 
+            self.processed_title_label.configure(text="Amplitude Reconstruction ")
             self.dimensions_var.set(1)
             if hasattr(self, 'current_amp_index'):
                 tGUI.load_ui_from_filter_state(self, dimension=2, index=self.current_amp_index)
@@ -2802,6 +2860,9 @@ class App(ctk.CTk):
         phase_0to1 = (raw_phase + np.pi) / (2 * np.pi + 1e-9)
         phase_0to1 = np.clip(phase_0to1, 0, 1)
         phase_8bit = (phase_0to1 * 255).astype(np.uint8)
+
+
+
 
         # Create PIL images
         amp_pil = Image.fromarray(amp_norm, mode='L')

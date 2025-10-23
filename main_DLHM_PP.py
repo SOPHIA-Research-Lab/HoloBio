@@ -820,6 +820,23 @@ class App(ctk.CTk):
         if self.recon_view_var.get().startswith("Amplitude"):
             self.update_right_view()
 
+    def _show_unwrap_mode_menu(self):
+        """Dropdown menu for phase unwrapping options."""
+        menu = tk.Menu(self, tearoff=0)
+        opts = ["WPhU", "Skimage Unwrap", "Original"]
+        for opt in opts:
+            menu.add_radiobutton(
+                label=opt, value=opt,
+                variable=self.unwrap_method_var,
+                command=self._on_unwrap_mode_changed
+            )
+        menu.tk_popup(self.unwrap_mode_button.winfo_rootx(),
+                      self.unwrap_mode_button.winfo_rooty() + self.unwrap_mode_button.winfo_height())
+
+    def _on_unwrap_mode_changed(self):
+        if self.recon_view_var.get() == "Phase Reconstruction ":
+            self.update_right_view()
+
     def _generate_ft_display(self, holo_array: np.ndarray, log_scale: bool = True) -> np.ndarray:
         if holo_array is None or holo_array.size == 0:
             return np.zeros((1, 1), dtype=np.uint8)

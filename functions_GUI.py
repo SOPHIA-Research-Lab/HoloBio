@@ -307,7 +307,7 @@ def build_toolbar(app):
 def build_two_views_panel(app):
     """
     Re-creates the twin viewers (left = Hologram/FT, right = Phase/Amp)
-    exactly as they were in the original _build_two_views_panel().
+    with Zoom buttons aligned at the right edge of the titles.
     """
     # root container inside *app.viewing_frame
     app.two_views_frame = ctk.CTkFrame(
@@ -331,7 +331,7 @@ def build_two_views_panel(app):
     app.left_frame.grid_columnconfigure(0, weight=1)
     app.left_frame.grid_columnconfigure(1, weight=0)
 
-    # Radio-buttons, Zoom and title
+    # Radio-buttons, dropdowns
     app.holo_view_var = tk.StringVar(value="Hologram")
     app.radio_holo = ctk.CTkRadioButton(
         app.left_frame, text="Hologram",
@@ -341,10 +341,12 @@ def build_two_views_panel(app):
     app.radio_holo.grid(row=0, column=0, padx=(10, 5), pady=5, sticky="w")
 
     app.zoom_holo_button = ctk.CTkButton(
-        app.left_frame, text="Zoom🔍", width=60,
+        app.left_frame, text="Zoom 🔍", width=60,
         command=app.zoom_holo_view
     )
-    app.zoom_holo_button.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="e")
+    # ⬇️ Moved to the title row
+    # app.zoom_holo_button.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="e")
+    app.zoom_holo_button.grid(row=2, column=1, padx=(0, 10), pady=5, sticky="e")
 
     app.radio_ft = ctk.CTkRadioButton(
         app.left_frame, text="Fourier Transform",
@@ -364,8 +366,8 @@ def build_two_views_panel(app):
         app.left_frame, text="Hologram",
         font=ctk.CTkFont(size=14, weight="bold")
     )
-    app.captured_title_label.grid(row=2, column=0, columnspan=2,
-                                  padx=5, pady=5, sticky="n")
+    # ⬇️ No columnspan; title at col 0, Zoom en col 1
+    app.captured_title_label.grid(row=2, column=0, padx=5, pady=5, sticky="n")
 
     app.captured_label = ctk.CTkLabel(
         app.left_frame, text="", image=app.holo_views[0][1]
@@ -408,18 +410,35 @@ def build_two_views_panel(app):
     app.right_frame.grid_columnconfigure(1, weight=0)
 
     app.recon_view_var = tk.StringVar(value="Phase Reconstruction ")
+
+    # Phase Reconstruction (row 0) sub-frame
+    right_row0 = ctk.CTkFrame(app.right_frame, fg_color="transparent")
+    right_row0.grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
+    right_row0.grid_columnconfigure(0, weight=1)
+    right_row0.grid_columnconfigure(1, weight=0)
+
+    app.recon_view_var = tk.StringVar(value="Phase Reconstruction ")
     app.radio_phase = ctk.CTkRadioButton(
-        app.right_frame, text="Phase Reconstruction ",
+        right_row0, text="Phase Reconstruction ",
         variable=app.recon_view_var, value="Phase Reconstruction ",
         command=app.update_right_view
     )
     app.radio_phase.grid(row=0, column=0, padx=(10, 5), pady=5, sticky="w")
 
+    app.unwrap_mode_var = tk.StringVar(value="Unwrapping")
+    app.unwrap_mode_button = ctk.CTkButton(
+        right_row0, text="▼", width=25,
+        command=getattr(app, "_show_unwrap_mode_menu", lambda: None)
+    )
+    app.unwrap_mode_button.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="e")
+
     app.zoom_recon_button = ctk.CTkButton(
-        app.right_frame, text="Zoom🔍", width=60,
+        app.right_frame, text="Zoom 🔍", width=60,
         command=app.zoom_recon_view
     )
-    app.zoom_recon_button.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="e")
+    # ⬇️ Moved to the title row
+    # app.zoom_recon_button.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="e")
+    app.zoom_recon_button.grid(row=2, column=1, padx=(0, 10), pady=5, sticky="e")
 
     app.radio_amp = ctk.CTkRadioButton(
         app.right_frame, text="Amplitude Reconstruction ",
@@ -439,8 +458,8 @@ def build_two_views_panel(app):
         app.right_frame, text="Phase Reconstruction ",
         font=ctk.CTkFont(size=14, weight="bold")
     )
-    app.processed_title_label.grid(row=2, column=0, columnspan=2,
-                                   padx=5, pady=5, sticky="n")
+    # ⬇️ No columnspan; title at col 0, Zoom en col 1
+    app.processed_title_label.grid(row=2, column=0, padx=5, pady=5, sticky="n")
 
     app.processed_label = ctk.CTkLabel(
         app.right_frame, text="", image=app.recon_views[0][1]
