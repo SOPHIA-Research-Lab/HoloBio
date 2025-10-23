@@ -243,6 +243,146 @@ def create_propagate_panel(parent, attr_prefix="propagation", on_slider_change=N
     }
 
 
+# Propagation Panel Frame NP
+def create_propagate_panel_np(parent, attr_prefix="np_propagation", on_slider_change=None):
+    """
+    Simplified propagation panel for Numerical Propagation:
+    All distances are displayed with unit selector and simple sweep slider.
+    """
+
+    parent.grid_propagate(False)
+    for col in range(3):
+        parent.columnconfigure(col, weight=1)
+    parent.grid_columnconfigure(1, weight=1, minsize=110)
+    parent.grid_columnconfigure(2, weight=1, minsize=110)
+
+    # Title
+    ctk.CTkLabel(parent, text="Propagation", font=ctk.CTkFont(weight="bold"))\
+        .grid(row=0, column=0, columnspan=3, padx=5, pady=(10, 5), sticky="w")
+
+    # Radio Buttons (ONLY fixed and sweep)
+    np_mode_var = tk.StringVar(value="sweep")
+    radio_frame = ctk.CTkFrame(parent, fg_color="transparent")
+    radio_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=(0, 5), sticky="w")
+    ctk.CTkRadioButton(radio_frame, text="Fixed Distance", variable=np_mode_var, value="fixed")\
+        .grid(row=0, column=0, padx=5)
+    ctk.CTkRadioButton(radio_frame, text="Z-scan Sweep",  variable=np_mode_var, value="sweep")\
+        .grid(row=0, column=1, padx=5)
+
+    # Distance Labels (no Lateral M.)
+    dist_labels = {
+        "distance": ctk.CTkLabel(parent, text="Distance (µm)"),
+        "min":      ctk.CTkLabel(parent, text="Min. (µm)"),
+        "max":      ctk.CTkLabel(parent, text="Max. (µm)"),
+    }
+    dist_labels["distance"].grid(row=2, column=0, padx=5, pady=(5, 0), sticky="n")
+    dist_labels["min"].grid(row=2, column=1, padx=5, pady=(5, 0), sticky="n")
+    dist_labels["max"].grid(row=2, column=2, padx=5, pady=(5, 0), sticky="n")
+
+    # Entry fields (no magnification)
+    fixed_distance_entry = ctk.CTkEntry(parent, width=90, placeholder_text="0.0")
+    fixed_distance_entry.grid(row=3, column=0, padx=5, pady=(0, 10))
+    min_entry = ctk.CTkEntry(parent, width=90, placeholder_text="0.0")
+    min_entry.grid(row=3, column=1, padx=5, pady=(0, 10))
+    max_entry = ctk.CTkEntry(parent, width=90, placeholder_text="100.0")
+    max_entry.grid(row=3, column=2, padx=5, pady=(0, 10))
+
+    # Units Dropdown
+    unit_var = tk.StringVar(value="µm")
+    previous_unit = {"val": "µm"}
+    unit_scales = {"µm": 1.0, "mm": 1000.0, "cm": 10000.0}
+
+    ctk.CTkLabel(parent, text="Units:").grid(row=4, column=0, padx=5, pady=(5, 0), sticky="e")
+    unit_selector = ctk.CTkOptionMenu(parent, variable=unit_var, values=["µm", "mm", "cm"], width=100)
+    unit_selector.grid(row=4, column=1, padx=1, pady=(0, 0), sticky="w")
+
+    def _convert_on_unit_change(*_):
+        old_unit = previous_unit["val"]
+        new_unit = unit_var.get()
+        if old_unit == new_unit:
+            return
+        try:
+            factor = unit_scales[old_unit] / unit_scales[new_unit]
+            for entry in (fixed_distance_entry, min_entry, max_entry):
+                try:
+                    v = float(entry.get()); entry.delete(0, tk.END); entry.insert(0, f"{v*factor:.3f}")
+                except ValueError:
+                    pass
+            previous_unit["val"] = new_unit
+            name = "Distance" if np_mode_var.get() == "fixed" else "Step"
+            dist_labels["distance"].configure(text=f"{name} ({new_unit})")
+            dist_labels["min"].configure(text=f"Min. ({new_unit})")
+            dist_labels["max"].configure(text=f"Max. ({new_unit})")
+            current_value_label.configure(text=f"{propagate_slider.get():.1f} {new_unit}")
+        except KeyError:
+            pass
+
+    unit_var.trace_add("write", _convert_on_unit_change)
+
+    # Slider (simple; no magnification scaling)
+    def _slider_cb(val):
+        current_value_label.configure(text=f"{float(val):.2f} {unit_var.get()}")
+        if on_slider_change:
+            on_slider_change(val)
+
+    propagate_slider = ctk.CTkSlider(parent, from_=0, to=100, number_of_steps=100, width=250, command=_slider_cb)
+    propagate_slider.grid(row=6, column=0, columnspan=2, padx=(10, 5), pady=5, sticky="ew")
+
+    current_value_label = ctk.CTkLabel(parent, text=f"0.0 {unit_var.get()}")
+    current_value_label.grid(row=6, column=2, padx=(0, 10), sticky="e")
+
+    # Helpers
+    def set_widget_state(widget, enabled=True):
+        widget.configure(state=("normal" if enabled else "disabled"))
+        if isinstance(widget, ctk.CTkEntry):
+            widget.configure(text_color=("black", "white") if enabled else "gray50")
+
+    def _show(w, show=True):
+        if not w: return
+        (w.grid() if show else w.grid_remove())
+
+    def _update_visibility(*_):
+        mode = np_mode_var.get()
+        set_widget_state(fixed_distance_entry, mode in ("fixed", "sweep"))
+        set_widget_state(min_entry,            mode == "sweep")
+        set_widget_state(max_entry,            mode == "sweep")
+
+        fixed_distance_entry.configure(placeholder_text=("0.0" if mode == "fixed" else "step"))
+        only_distance = (mode == "fixed")
+        _show(dist_labels["min"], not only_distance); _show(min_entry, not only_distance)
+        _show(dist_labels["max"], not only_distance); _show(max_entry, not only_distance)
+
+        propagate_slider.configure(state=("normal" if mode == "sweep" else "disabled"))
+        if mode == "sweep":
+            try:
+                a = float(min_entry.get()); b = float(max_entry.get())
+                if a < b: propagate_slider.configure(from_=a, to=b)
+            except ValueError:
+                pass
+
+        name = "Distance" if mode == "fixed" else "Step"
+        dist_labels["distance"].configure(text=f"{name} ({unit_var.get()})")
+
+    np_mode_var.trace_add("write", _update_visibility)
+    _update_visibility()
+
+    # Apply
+    apply_button = ctk.CTkButton(parent, text="Apply", width=100, command=lambda: None)
+    apply_button.grid(row=8, column=0, columnspan=3, padx=10, pady=(10, 10), sticky="w")
+
+    # Return dict (note the attr_prefix names are distinct from the original)
+    return {
+        f"{attr_prefix}_mode_var": np_mode_var,
+        f"{attr_prefix}_fixed_distance": fixed_distance_entry,
+        f"{attr_prefix}_min_entry": min_entry,
+        f"{attr_prefix}_max_entry": max_entry,
+        f"{attr_prefix}_slider": propagate_slider,
+        f"{attr_prefix}_current_label": current_value_label,
+        f"{attr_prefix}_apply_button": apply_button,
+        f"{attr_prefix}_unit_var": unit_var,
+        f"{attr_prefix}_unit_selector": unit_selector,
+    }
+
 # Toolbar panel
 def build_toolbar(app):
     """

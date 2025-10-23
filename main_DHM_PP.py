@@ -1,6 +1,6 @@
 
 # Standard Library
-import os, zipfile, io
+import os,zipfile, io
 import math
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -9,21 +9,19 @@ import cv2
 import matplotlib.pyplot as plt
 from settingsCompensation import create_compensation_settings
 from unwrap_methods import apply_unwrap
-
+from pyDHM_methods import angularSpectrum, fresnel
 
 # Third-Party Libraries
 import customtkinter as ctk
 from matplotlib.widgets import RectangleSelector
 from PIL import ImageTk
 from pandastable import Table
-from scipy import ndimage
 
 # Custom Modules
 import pyDHM_methods as pyDHM
 import functions_GUI as fGUI
 import tools_GUI as tGUI
 from pyDHM_methods import spatialFilteringCF, draw_manual_circle, draw_manual_rectangle
-from pyDHM import utilities
 from parallel_rc import *
 from phaseShifting import PS5, PS4, PS3, SOSR, BPS2, BPS3
 
@@ -300,20 +298,12 @@ class App(ctk.CTk):
         fGUI.init_filters_frame(self)
         fGUI.init_speckles_frame(self)
 
-    # ─────────────────────────────────────────────
     # Init view window
-    # ─────────────────────────────────────────────
     def init_viewing_frame(self) -> None:
         """
         Wrapper that constructs the complete “Viewing Window” UI.
-
-        Internally it delegates the work to two helpers so the layout
-        is cleanly split:
-
-        • `_build_nav_and_toolbar()`   → left strip and the top toolbar
-        • `_build_two_views_panel()`   → side-by-side image viewers
         """
-        self._build_navigation_strip()  # creates navigation_frame & viewing_frame
+        self._build_navigation_strip()
         fGUI.build_toolbar(self)
         fGUI.build_two_views_panel(self)
 
@@ -346,7 +336,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=15, weight="bold")
         ).grid(row=0, column=0, padx=20, pady=20)
 
-        # Visual config for every button
+        # Visual configuration for every button
         btn_cfg = dict(
             corner_radius=6, height=MENU_BUTTONS_HEIGHT,
             width=MENU_FRAME_WIDTH, border_spacing=10,
@@ -354,7 +344,6 @@ class App(ctk.CTk):
             text_color=("gray10", "gray90"),
             hover_color=("gray80", "gray20"), anchor="c"
         )
-        # Grid config (NOT passed to the widget!)
         grid_cfg = dict(sticky="ew", padx=1, pady=0)
 
         ctk.CTkButton(
@@ -514,7 +503,8 @@ class App(ctk.CTk):
                 self.captured_label.image = self.ft_frames[idx]
                 self.current_ft_array = self.multi_ft_arrays[idx]
             return
-        # SINGLE-HOLOGRAM path
+
+        # Single hologram path
         if getattr(self, "arr_hologram", None) is None:
             return
         tk_ft, ft_disp = self._create_ft_frame(self.arr_hologram)
@@ -610,7 +600,7 @@ class App(ctk.CTk):
         f = np.fft.fftshift(np.fft.fft2(holo_array.astype(np.float32)))
         mag = np.abs(f)
         if log_scale:
-            mag = np.log1p(mag)  # dynamic-range compression
+            mag = np.log1p(mag)
         mag = mag / (mag.max() + 1e-12)
         return (mag * 255.0).astype(np.uint8)
 
@@ -675,7 +665,6 @@ class App(ctk.CTk):
         tGUI.load_ui_from_filter_state(self, dimension=0, index=self.current_left_index)
 
     def update_left_view(self):
-
         choice = self.holo_view_var.get()
 
         # No multi-hologram list yet → single array path
@@ -720,7 +709,7 @@ class App(ctk.CTk):
         else:
             self._deactivate_ft_coordinate_display()
 
-    # ------------------- RIGHT-VIEW UPDATE (MOD) ---------------------- #
+    # RIGHT-VIEW UPDATE (MOD)
     def update_right_view(self):
         choice = self.recon_view_var.get()
 
@@ -730,13 +719,12 @@ class App(ctk.CTk):
                 method = self.unwrap_method_var.get()
 
                 if method == "Original":
-
                     if hasattr(self, 'phase_frames') and self.phase_frames:
                         self.processed_label.configure(image=self.phase_frames[idx])
                         self.processed_label.image = self.phase_frames[idx]
                     else:
                         self.processed_label.configure(image=self.img_black)
-                    self.processed_title_label.configure(text="Phase Reconstruction ")
+                    self.processed_title_label.configure(text="Phase Reconstruction")
                 else:
                     # Unwrapping
                     key = (idx, method)
@@ -960,9 +948,7 @@ class App(ctk.CTk):
         )
         return tk_img, ft_u8
 
-    # ────────────────────────────────────────────────────────────
     # Load hologram for phase compensation
-    # ────────────────────────────────────────────────────────────
     def load_hologram(self):
         """Re-implemented so the stored FT is *not* log‐scaled up-front."""
         # housekeeping
@@ -1008,9 +994,7 @@ class App(ctk.CTk):
         self._reset_left_view_to_hologram()
         self._reset_recon_panel()
 
-        # ──────────────────────────────
     # Load images for phase shifting method
-    # ──────────────────────────────
     def load_images(self):
         """Load one or more hologram images and prepare their corresponding frames."""
         # Open file dialog to select
@@ -1085,52 +1069,41 @@ class App(ctk.CTk):
         self._reset_left_view_to_hologram()
         self._reset_recon_panel()
 
-    # ────────────────────────────────────────────────────────────
     # Load generic image for numerical propagation
-    # ────────────────────────────────────────────────────────────
     def load_image_generic(self):
         file_path = filedialog.askopenfilename(title="Select image")
         if not file_path:
-            messagebox.showinfo(
-                "Information",
-                "No Image selected."
-            )
+            messagebox.showinfo("Information", "No Image selected.")
             return
 
-        img = Image.open(file_path).convert("L")
+        try:
+            img = Image.open(file_path).convert("L")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open image:\n{e}")
+            return
+
         img_array = np.array(img)
-
         self.coherent_input_image = img_array
+        self.generic_loaded_image = True
+        self.hologram_loaded = False
 
-        # Check if the user has selected the "Coherent Image" option
-        if self.np_source_var.get() == 1:
-            self._load_and_display_coherent_image()
-            return  # ← Very important: avoid continuing with the 'Digital Hologram' workflow
-
-        # If it's not a coherent image, continue with the standard hologram workflow
-        self.multi_holo_arrays = [img_array]
-        self.original_multi_holo_arrays = [img_array.copy()]
+        # Load Image within visualization panel
         tk_img = self._preserve_aspect_ratio(img, self.viewbox_width, self.viewbox_height)
-        tk_ft, ft_disp = self._create_ft_frame(img_array)
-
-        self.hologram_frames = [tk_img]
-        self.multi_ft_arrays = [ft_disp]
-        self.ft_frames = [tk_ft]
-        self.current_left_index = 0
-        self.arr_hologram = img_array
-        self.current_ft_array = ft_disp
-
         self.captured_label.configure(image=tk_img)
         self.captured_label.image = tk_img
-        self.captured_title_label.configure(text="Digital Hologram")
-
-        if self.holo_view_var.get() == "Fourier Transform":
-            self.captured_label.configure(image=tk_ft)
-
+        self.captured_title_label.configure(text="Coherent Image")
         self.hide_holo_arrows()
 
-        self._reset_left_view_to_hologram()
-        self._reset_recon_panel()
+        # clean all
+        self.multi_holo_arrays = [img_array]
+        self.original_multi_holo_arrays = [img_array.copy()]
+        self.arr_hologram = img_array
+
+        # reset panels
+        try:
+            self._reset_recon_panel()
+        except AttributeError:
+            pass
 
     def show_save_options(self):
         """
@@ -1324,7 +1297,6 @@ class App(ctk.CTk):
         # Wipe dimension=1 and dimension=2 filter states
         self.filter_states_dim1.clear()
         self.filter_states_dim2.clear()
-
         self.last_filter_settings = None
 
     def _init_colormap_settings(self):
@@ -1340,7 +1312,7 @@ class App(ctk.CTk):
 
     def on_filters_dimensions_change(self, *args):
         """
-        NEW method. Automatically toggles the main viewing window’s radio buttons
+        Automatically toggles the main viewing window’s radio buttons
         whenever the user changes the ‘Hologram / Amplitude image / Phase image’
         selection in the Filters panel.
         """
@@ -1357,7 +1329,6 @@ class App(ctk.CTk):
             # Phase => set the right radio to "Phase Reconstruction "
             self.recon_view_var.set("Phase Reconstruction ")
             self.update_right_view()
-        # No extra else needed, just keep it at 3 values.
 
     def update_qpi_placeholder(self) -> None:
         """
@@ -1444,14 +1415,11 @@ class App(ctk.CTk):
         _make_btn("Phase\nShifting", "phase_shifting", 1)
         _make_btn("Numerical\nPropagation", "numerical_propagation", 2)
 
-    # --------------------------------------------------------------------------
-    # --------------------- Phase-Shifting--------------------------------------
-    # --------------------------------------------------------------------------
+    # Build panel to Phase-Shifting
     def init_phase_shifting_frame(self):
         """
         Initializes the user interface for phase-shifting parameters and method selection.
         """
-        # MAIN CONTAINER
         # Create the outer frame for the phase-shifting section
         self.phase_shifting_frame = ctk.CTkFrame(self, corner_radius=8)
         self.phase_shifting_frame.grid_propagate(False)
@@ -1573,8 +1541,7 @@ class App(ctk.CTk):
         )
         self.radio_blind2.grid(row=3, column=1, padx=5, pady=5, sticky='w')
 
-        # Parameters frame
-        # Frame to hold input parameters for phase-shifting reconstruction
+        # Parameters frame / frame to hold input parameters for phase-shifting reconstruction
         self.params_shifting_frame = ctk.CTkFrame(
             self.parameters_inner_frame,
             width=PARAMETER_FRAME_WIDTH,
@@ -2156,12 +2123,8 @@ class App(ctk.CTk):
     def _on_filter_section_changed(self, *_):
         """
         Callback function triggered when the spatial filter section selection changes.
-
         This method enables the corresponding dropdown menu (Automatic or Manual)
         based on the user's selection, and disables the inactive one to prevent conflicting input.
-
-        Parameters:
-        *_ : Accepts any additional arguments (e.g., from event bindings), but they are unused.
         """
         # Check if the current selection is 'Automatic' (value = 0)
         auto = (self.spatial_section_var.get() == 0)
@@ -2324,6 +2287,27 @@ class App(ctk.CTk):
             return
 
         self._propagate_current_field(distance_um)
+
+    def _on_np_slider_moved(self, val):
+        """Callback del slider para el panel NP (sin claves del panel viejo)."""
+        try:
+            # lee el modo del panel NP
+            w = getattr(self, "propagate_widgets_np", {})
+            mode_var = w.get("np_propagation_mode_var")
+            if not mode_var:
+                return  # panel no inicializado
+
+            if mode_var.get() != "sweep":
+                return  # solo propagamos cuando está en Sweep
+
+            # método actual (0=Angular, 1=Fresnel)
+            method_id = self.prop_method_var.get() if hasattr(self, "prop_method_var") else 0
+            method = "angular" if method_id == 0 else "fresnel"
+
+            # propaga a la distancia indicada por el slider (en µm)
+            self._propagate_current_field_np(float(val), method)
+        except Exception as e:
+            print("[_on_np_slider_moved] error:", e)
 
     def _apply_propagation(self, request_magnification):
         """
@@ -2531,6 +2515,68 @@ class App(ctk.CTk):
             import threading
             threading.Thread(target=run_autofocus_in_thread, daemon=True).start()
 
+    def _apply_propagation_np(self, method: str, wavelength_um: float,
+                              pitch_x_um: float, pitch_y_um: float, mode: str,
+                              distance_um: float | None = None,
+                              zmin_um: float | None = None, zmax_um: float | None = None,
+                              step_um: float | None = None, unit: str = "µm"):
+
+        # Propagation method flag (0=angular,1=fresnel)
+        try:
+            self.prop_method_var.set(0 if method.lower().startswith("ang") else 1)
+        except Exception:
+            pass
+
+        widgets = getattr(self, "propagate_widgets_np", {})
+
+        if mode == "fixed":
+            if distance_um is None:
+                messagebox.showinfo("Information", "Please enter a valid numeric fixed distance.")
+                return
+            try:
+                distance_um = float(distance_um)
+            except ValueError:
+                messagebox.showinfo("Information", "Please enter a valid numeric fixed distance.")
+                return
+
+            self._propagate_current_field_np(distance_um, method)
+
+        elif mode == "sweep":
+            try:
+                zmin_um = float(zmin_um);
+                zmax_um = float(zmax_um);
+                step_um = float(step_um)
+            except (TypeError, ValueError):
+                messagebox.showinfo("Information", "Please enter valid min/max/step values.")
+                return
+
+            if zmin_um >= zmax_um:
+                messagebox.showinfo("Information", "Minimum must be less than maximum.")
+                return
+            if step_um <= 0:
+                messagebox.showinfo("Information", "Step must be positive.")
+                return
+            if not (zmin_um < zmin_um + step_um <= zmax_um):
+                messagebox.showinfo("Information", "Step must be between minimum and maximum values.")
+                return
+
+            slider = widgets.get("np_propagation_slider")
+            if slider is not None:
+                try:
+                    slider.configure(from_=zmin_um, to=zmax_um)
+                    nsteps = max(1, int(round((zmax_um - zmin_um) / step_um)))
+                    slider.configure(number_of_steps=nsteps)
+                    slider.set(zmin_um)
+                except Exception:
+                    pass
+
+            # run propagation
+            self._propagate_current_field_np(zmin_um, method)
+
+        else:
+            messagebox.showinfo("Information", "Unknown propagation mode.")
+            return
+
     def _propagate_current_field(self, distance_um: float):
         """
         Propagate current complex field to the given distance.
@@ -2584,6 +2630,89 @@ class App(ctk.CTk):
             self.processed_label.configure(image=tk_phs)
             self.processed_label.image = tk_phs
             self.processed_title_label.configure(text=f"Phase Image – {dist_txt}")
+
+    def _propagate_current_field_np(self, distance_um: float, method: str):
+        """
+        Run propagation for numerical propagation frame.
+        - implement self.wavelength, self.dx, self.dy (en µm).
+        """
+
+        # validations
+        if (
+                not hasattr(self, "compensated_field_complex") or
+                self.compensated_field_complex is None or
+                not isinstance(self.compensated_field_complex, np.ndarray) or
+                self.compensated_field_complex.size == 0
+        ):
+            messagebox.showinfo("Information", "No compensated field available.")
+            return
+
+        comp_field = self.compensated_field_complex
+
+        if not hasattr(self, "wavelength") or not hasattr(self, "dx") or not hasattr(self, "dy"):
+            messagebox.showinfo("Information", "Missing physical parameters (λ, dx, dy).")
+            return
+
+        if abs(float(self.wavelength)) < 1e-12 or abs(float(self.dx)) < 1e-12 or abs(float(self.dy)) < 1e-12:
+            print("Invalid physical parameters: check wavelength or pixel size.")
+            return
+
+        λ = float(self.wavelength)
+        dx = float(self.dx)
+        dy = float(self.dy)
+
+        # Choose propagator
+        field_out = None
+        if method.lower().startswith("ang"):
+            field_out = angularSpectrum(comp_field, distance_um, λ, dx, dy)
+        else:
+            field_out = fresnel(comp_field, distance_um, λ, dx, dy)
+
+        # amplitude and phase
+        amp = np.abs(field_out)
+        amp8 = ((amp - amp.min()) / (np.ptp(amp) + 1e-9) * 255).astype(np.uint8)
+
+        phs = np.angle(field_out)
+        phs8 = (((phs + np.pi) / (2. * np.pi)) * 255).astype(np.uint8)
+
+        # Save outcomes in buffers
+        if not hasattr(self, "amplitude_arrays") or len(getattr(self, "amplitude_arrays", [])) == 0:
+            self.amplitude_arrays = [amp8]
+            self.original_amplitude_arrays = [amp8.copy()]
+        else:
+            self.amplitude_arrays[0] = amp8
+            self.original_amplitude_arrays[0] = amp8.copy()
+
+        if not hasattr(self, "phase_arrays") or len(getattr(self, "phase_arrays", [])) == 0:
+            self.phase_arrays = [phs8]
+            self.original_phase_arrays = [phs8.copy()]
+        else:
+            self.phase_arrays[0] = phs8
+            self.original_phase_arrays[0] = phs8.copy()
+
+        # Load outcomes
+        tk_amp = self._preserve_aspect_ratio_right(Image.fromarray(amp8))
+        tk_phs = self._preserve_aspect_ratio_right(Image.fromarray(phs8))
+
+        if not hasattr(self, "amplitude_frames") or len(self.amplitude_frames) == 0:
+            self.amplitude_frames = [tk_amp]
+        else:
+            self.amplitude_frames[0] = tk_amp
+
+        if not hasattr(self, "phase_frames") or len(self.phase_frames) == 0:
+            self.phase_frames = [tk_phs]
+        else:
+            self.phase_frames[0] = tk_phs
+
+        view = self.recon_view_var.get() if hasattr(self, "recon_view_var") else "Amplitude Reconstruction"
+        if view.strip() == "Amplitude Reconstruction":
+            self.processed_label.configure(image=tk_amp)
+            self.processed_label.image = tk_amp
+            self.processed_title_label.configure(text="Amplitude Image")
+        else:
+            self.processed_label.configure(image=tk_phs)
+            self.processed_label.image = tk_phs
+            self.processed_title_label.configure(text="Phase Image")
 
     def _show_autofocus_progress(self):
         self.progress_window = ctk.CTkToplevel(self)
@@ -3116,90 +3245,37 @@ class App(ctk.CTk):
             show_ft_and_filter=True
         )
 
-    # complex field function
-    def PhaseObject(self):
-        # Must be in "Coherent Image" mode
-        if self.np_source_var.get() != 1:
-            messagebox.showinfo("Source", "Select 'Coherent Image' first.")
-            return
+    def _ensure_phase_field_from_image(self, wavelength_um: float, pitch_x_um: float, pitch_y_um: float):
+        """
+        Crea un campo complejo PURO DE FASE a partir de self.coherent_input_image y
+        lo deja en self.compensated_field_complex. También fija λ, dx, dy (en µm).
+        """
+        if (
+                not hasattr(self, "coherent_input_image") or
+                self.coherent_input_image is None
+        ):
+            messagebox.showinfo("Information", "No coherent image loaded.")
+            return False
 
-        # Read physical params
-        try:
-            wavelength = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)
-            pitch_x = self.get_value_in_micrometers(self.pitchx_label_np_entry.get(), self.pitch_x_unit)
-            pitch_y = self.get_value_in_micrometers(self.pitchy_label_np_entry.get(), self.pitch_y_unit)
-        except Exception:
-            messagebox.showwarning("Parameters", "Invalid wavelength / pitch values.")
-            return
-        if any(v in (None, 0) for v in (wavelength, pitch_x, pitch_y)):
-            messagebox.showwarning("Parameters", "Wavelength and pitch must be non-zero.")
-            return
-
-        # Find the already-loaded grayscale 8-bit image (try common attributes)
-        img = None
-        for cand in ("coherent_image", "generic_loaded_image", "loaded_image_np", "arr_loaded_image", "arr_hologram"):
-            if hasattr(self, cand) and getattr(self, cand) is not None:
-                img = getattr(self, cand)
-                break
-        if img is None:
-            messagebox.showinfo("Image", "Load a grayscale image before creating a Phase Object.")
-            return
-
-        import numpy as np
-        img = np.asarray(img)
+        img = np.asarray(self.coherent_input_image)
         if img.ndim != 2:
             messagebox.showwarning("Image", "The image must be single-channel (grayscale).")
-            return
+            return False
 
+        # Escala 8-bit -> fase [0, 2π)
         img_f = img.astype(np.float32)
         phi = (img_f / 255.0) * (2.0 * np.pi)
-        U = np.exp(1j * phi).astype(np.complex64)
+        U = np.exp(1j * phi).astype(np.complex64)  # amplitud = 1, fase = phi
 
-        # Store for later propagation
-        self.coherent_field = U
-        self.wavelength = wavelength
-        self.dx = pitch_x
-        self.dy = pitch_y
+        # Dejar listo para la propagación
+        self.compensated_field_complex = U
+        self.wavelength = float(wavelength_um)
+        self.dx = float(pitch_x_um)
+        self.dy = float(pitch_y_um)
+        return True
 
-        # ---- Show on the RIGHT viewer (same pipeline as run_phase_compensation) ----
-        amp = np.abs(U)
-        raw_phase = np.angle(U)
-
-        amp_norm = (amp - amp.min()) / (amp.max() - amp.min() + 1e-9) * 255.0
-        amp_norm = amp_norm.astype(np.uint8)
-
-        phase_0to1 = (raw_phase + np.pi) / (2 * np.pi + 1e-9)
-        phase_0to1 = np.clip(phase_0to1, 0, 1)
-        phase_8bit = (phase_0to1 * 255.0).astype(np.uint8)
-
-        amp_pil = Image.fromarray(amp_norm, mode='L')
-        phs_pil = Image.fromarray(phase_8bit, mode='L')
-
-        tk_amp = self._preserve_aspect_ratio_right(amp_pil)
-        tk_phs = self._preserve_aspect_ratio_right(phs_pil)
-
-        # Store arrays & frames for your right-panel toggles
-        self.amplitude_arrays = [amp_norm]
-        self.phase_arrays = [phase_8bit]
-        self.original_amplitude_arrays = [amp_norm.copy()]
-        self.original_phase_arrays = [phase_8bit.copy()]
-        self.filter_states_dim1 = [tGUI.default_filter_state()]
-        self.filter_states_dim2 = [tGUI.default_filter_state()]
-        self.last_filter_settings = None
-        self.amplitude_frames = [tk_amp]
-        self.phase_frames = [tk_phs]
-        self.current_amp_index = 0
-        self.current_phase_index = 0
-
-        # Default to showing phase on the right
-        self.processed_label.configure(image=tk_phs)
-        self.processed_title_label.configure(text="Phase Reconstruction ")
-        self.recon_view_var.set("Phase Reconstruction ")
-        self.update_right_view()
-
-        messagebox.showinfo("Phase Object", "Pure phase field created from the image.")
-
-    # Numerical Propagation
+    '''
+    # Numerical Propagation old
     def init_numerical_propagation_frame(self) -> None:
         self.numerical_propagation_frame = ctk.CTkFrame(self, corner_radius=8)
         self.numerical_propagation_frame.grid_propagate(False)
@@ -3397,8 +3473,162 @@ class App(ctk.CTk):
         self.numerical_propagation_inner_frame.update_idletasks()
         self.numprop_canvas.config(scrollregion=self.numprop_canvas.bbox("all"))
 
+    '''
+    def init_numerical_propagation_frame(self) -> None:
+        # ---------- contenedor con canvas + scrollbar ----------
+        self.numerical_propagation_frame = ctk.CTkFrame(self, corner_radius=8)
+        self.numerical_propagation_frame.grid_propagate(False)
+
+        self.numprop_container = ctk.CTkFrame(self.numerical_propagation_frame, corner_radius=8, width=420)
+        self.numprop_container.grid_propagate(False)
+        self.numprop_container.pack(fill="both", expand=True)
+
+        self.numprop_scrollbar = ctk.CTkScrollbar(self.numprop_container, orientation='vertical')
+        self.numprop_scrollbar.grid(row=0, column=0, sticky='ns')
+
+        self.numprop_canvas = ctk.CTkCanvas(self.numprop_container, width=PARAMETER_FRAME_WIDTH)
+        self.numprop_canvas.grid(row=0, column=1, sticky='nsew')
+
+        self.numprop_container.grid_rowconfigure(0, weight=1)
+        self.numprop_container.grid_columnconfigure(1, weight=1)
+
+        self.numprop_canvas.configure(yscrollcommand=self.numprop_scrollbar.set)
+        self.numprop_scrollbar.configure(command=self.numprop_canvas.yview)
+
+        self.numerical_propagation_inner_frame = ctk.CTkFrame(self.numprop_canvas)
+        self.numprop_canvas.create_window((0, 0), window=self.numerical_propagation_inner_frame, anchor='nw')
+
+        # ---------- navegación (tu tira superior) ----------
+        self._add_processing_nav(self.numerical_propagation_inner_frame, current="numerical_propagation")
+
+        # ====================================================
+        # 1) MÉTODO DE PROPAGACIÓN  (se mantiene)
+        # ====================================================
+        self.prop_method_frame = ctk.CTkFrame(
+            self.numerical_propagation_inner_frame,
+            width=PARAMETER_FRAME_WIDTH,
+            height=PARAMETER_FRAME_HEIGHT
+        )
+        self.prop_method_frame.grid(row=1, column=0, sticky='ew', pady=2)
+        self.prop_method_frame.grid_propagate(False)
+
+        ctk.CTkLabel(
+            self.prop_method_frame,
+            text='Choose a Propagation Method',
+            font=ctk.CTkFont(weight="bold")
+        ).grid(row=0, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+
+        self.prop_method_var = tk.IntVar(value=0)
+        self.prop_method_var.trace_add("write", self.update_propagation_params)
+
+        ctk.CTkRadioButton(
+            self.prop_method_frame, text='Angular Spectrum',
+            variable=self.prop_method_var, value=0
+        ).grid(row=1, column=0, sticky='w', padx=50, pady=4)
+
+        ctk.CTkRadioButton(
+            self.prop_method_frame, text='Fresnel',
+            variable=self.prop_method_var, value=1
+        ).grid(row=1, column=1, sticky='w', padx=50, pady=4)
+
+        # ====================================================
+        # 2) PARÁMETROS FÍSICOS  (se mantienen)
+        # ====================================================
+        self.params_np_frame = ctk.CTkFrame(
+            self.numerical_propagation_inner_frame,
+            width=PARAMETER_FRAME_WIDTH * 2,
+        )
+        self.params_np_frame.grid(row=2, column=0, sticky='ew', pady=2)
+        self.params_np_frame.grid_propagate(True)
+        for col in range(3):
+            self.params_np_frame.columnconfigure(col, weight=1)
+
+        ctk.CTkLabel(
+            self.params_np_frame,
+            text="Physical Parameters",
+            font=ctk.CTkFont(weight="bold")
+        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(5, 2), sticky="w")
+
+        units = ["µm", "nm", "mm", "cm", "m", "in"]
+        self.param_entries_np = {}
+
+        fGUI.create_param_with_arrow(
+            parent=self.params_np_frame, row=1, col=0,
+            label_text=f"Wavelength ({self.wavelength_unit})",
+            unit_list=units, entry_name_dict=self.param_entries_np,
+            entry_key="wavelength", unit_update_callback=self._set_unit_in_label
+        )
+        fGUI.create_param_with_arrow(
+            parent=self.params_np_frame, row=1, col=1,
+            label_text=f"Pitch X ({self.pitch_x_unit})",
+            unit_list=units, entry_name_dict=self.param_entries_np,
+            entry_key="pitch_x", unit_update_callback=self._set_unit_in_label
+        )
+        fGUI.create_param_with_arrow(
+            parent=self.params_np_frame, row=1, col=2,
+            label_text=f"Pitch Y ({self.pitch_y_unit})",
+            unit_list=units, entry_name_dict=self.param_entries_np,
+            entry_key="pitch_y", unit_update_callback=self._set_unit_in_label
+        )
+
+        self.wave_label_np_entry = self.param_entries_np["wavelength"]
+        self.pitchx_label_np_entry = self.param_entries_np["pitch_x"]
+        self.pitchy_label_np_entry = self.param_entries_np["pitch_y"]
+
+        # ====================================================
+        # 3) OPCIONES DE PROPAGACIÓN  (se mantienen)
+        # ====================================================
+        self.np_propagation_panel = ctk.CTkFrame(
+            self.numerical_propagation_inner_frame,
+            width=PARAMETER_FRAME_WIDTH,
+            height=PARAMETER_FRAME_HEIGHT * 3.4
+        )
+        self.np_propagation_panel.grid(row=3, column=0, sticky='ew', pady=2)
+        self.np_propagation_panel.grid_propagate(True)
+
+        for col in range(3):
+            self.np_propagation_panel.columnconfigure(col, weight=1)
+
+        ctk.CTkLabel(
+            self.np_propagation_panel,
+            text="Propagation Options",
+            font=ctk.CTkFont(weight="bold")
+        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(5, 2), sticky="w")
+
+        self.propagate_widgets_np = fGUI.create_propagate_panel_np(
+            parent=self.np_propagation_panel,
+            attr_prefix="np_propagation",
+            on_slider_change=self._on_np_slider_moved
+        )
+
+        # Si no quieres mostrar AF aquí, intenta remover/ocultar si las claves existen.
+        try:
+            # Radio de 'Auto Focus'
+            if "autofocus_radio" in self.propagate_widgets_np:
+                self.propagate_widgets_np["autofocus_radio"].grid_remove()
+            # Métrica de AF + combo + check de curva
+            for key in ("autofocus_metric_label", "autofocus_metric_combo", "autofocus_show_curve"):
+                if key in self.propagate_widgets_np:
+                    self.propagate_widgets_np[key].grid_remove()
+        except Exception:
+            pass
+        # ---------------------------------------------------------------
+
+        self.active_propagate_widgets = self.propagate_widgets_np
+        self.compensation_source = "np"
+
+        # El botón Apply del panel de propagación dispara la corrida completa
+        self.propagate_widgets_np["np_propagation_apply_button"].configure(
+            command=self.run_numerical_propagation
+        )
+
+        # ---------- refresco final del canvas ----------
+        self.numerical_propagation_inner_frame.update_idletasks()
+        self.numprop_canvas.config(scrollregion=self.numprop_canvas.bbox("all"))
+
 
     # Apply button in Numerical Propagation
+    '''
     def run_numerical_propagation(self):
         source = self.np_source_var.get()
 
@@ -3459,7 +3689,139 @@ class App(ctk.CTk):
                 "Reconstruction parameters (wavelength and pixel size) cannot be zero. Please verify them before proceeding."
             )
             return
+    '''
 
+    def run_numerical_propagation(self):
+        """
+        Numerical Propagation (coherent-only) -> delegates to _apply_propagation_np
+        Reads method (Angular/Fresnel) and NP panel values (fixed/sweep).
+        """
+
+        # 0) Validación: imagen coherente
+        if (
+                not hasattr(self, "coherent_input_image") or
+                self.coherent_input_image is None or
+                not isinstance(self.coherent_input_image, np.ndarray) or
+                self.coherent_input_image.size == 0 or
+                np.all(self.coherent_input_image == 0)
+        ):
+            messagebox.showinfo("Warning",
+                                "No coherent image is currently loaded. Please load a valid image before applying numerical propagation.")
+            return
+
+        # 1) Parámetros físicos (en µm)
+        try:
+            w_um = self.get_value_in_micrometers(self.wave_label_np_entry.get(), self.wavelength_unit)
+        except Exception:
+            w_um = 0.0
+        try:
+            px_um = self.get_value_in_micrometers(self.pitchx_label_np_entry.get(), self.pitch_x_unit)
+        except Exception:
+            px_um = 0.0
+        try:
+            py_um = self.get_value_in_micrometers(self.pitchy_label_np_entry.get(), self.pitch_y_unit)
+        except Exception:
+            py_um = 0.0
+
+        if w_um == 0.0 or px_um == 0.0 or py_um == 0.0:
+            messagebox.showwarning("Warning",
+                                   "Reconstruction parameters (wavelength and pixel size) cannot be zero. Please verify them before proceeding.")
+            return
+
+        # 2) Método de propagación desde los radio-buttons del frame de método
+        #    (0 = Angular Spectrum, 1 = Fresnel)
+        try:
+            method_id = self.prop_method_var.get()
+        except Exception:
+            method_id = 0
+        method = "angular" if method_id == 0 else "fresnel"
+
+        # 3) Lee valores del nuevo panel NP (create_propagate_panel_np)
+        #    OJO: el attr_prefix que pusimos fue "np_propagation"
+        wdict = getattr(self, "propagate_widgets_np", {})
+        mode_var = wdict.get("np_propagation_mode_var", None)
+        unit_var = wdict.get("np_propagation_unit_var", None)
+
+        mode = mode_var.get() if mode_var is not None else "sweep"  # "fixed" | "sweep"
+        unit = unit_var.get() if unit_var is not None else "µm"
+
+        # Campos numéricos
+        def _read_float(entry, default=0.0):
+            try:
+                return float(entry.get())
+            except Exception:
+                return default
+
+        dist_fixed = _read_float(wdict.get("np_propagation_fixed_distance", None), 0.0)
+        zmin = _read_float(wdict.get("np_propagation_min_entry", None), 0.0)
+        zmax = _read_float(wdict.get("np_propagation_max_entry", None), 100.0)
+
+        # Si el usuario está en "sweep", el "dist_fixed" significa "step"
+        step = dist_fixed if mode == "sweep" else None
+
+        # 4) Prepara vista coherente (si convierte a campo complejo, etc.)
+        try:
+            self._load_and_display_coherent_image()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed preparing coherent-image view:\n{e}")
+            return
+
+        self._ensure_phase_field_from_image(w_um, px_um, py_um)
+
+        # 5) Llama a tu NUEVA rutina central de propagación
+        #    Ajusta la firma de _apply_propagation_np según lo que necesites internamente.
+        self._apply_propagation_np(
+            method=method,  # "angular" | "fresnel"
+            wavelength_um=w_um,
+            pitch_x_um=px_um,
+            pitch_y_um=py_um,
+            mode=mode,  # "fixed" o "sweep"
+            distance_um=dist_fixed if mode == "fixed" else None,
+            zmin_um=zmin if mode == "sweep" else None,
+            zmax_um=zmax if mode == "sweep" else None,
+            step_um=step if mode == "sweep" else None,
+            unit=unit
+        )
+
+    def load_image_generic(self):
+        file_path = filedialog.askopenfilename(title="Select image")
+        if not file_path:
+            messagebox.showinfo("Information", "No Image selected.")
+            return
+
+        try:
+            img = Image.open(file_path).convert("L")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open image:\n{e}")
+            return
+
+        img_array = np.array(img)
+
+        # Estado: SIEMPRE coherente
+        self.coherent_input_image = img_array
+        self.generic_loaded_image = True
+        self.hologram_loaded = False  # por compatibilidad si se consulta en otro lado
+
+        # Mostrar en visor izquierdo
+        tk_img = self._preserve_aspect_ratio(img, self.viewbox_width, self.viewbox_height)
+        self.captured_label.configure(image=tk_img)
+        self.captured_label.image = tk_img
+        self.captured_title_label.configure(text="Coherent Image")
+        self.hide_holo_arrows()
+
+        # Procesar flujo coherente (conversión a campo complejo, etc.)
+        self._load_and_display_coherent_image()
+
+        # (Opcional) mantener estos arrays si otras rutas los usan:
+        self.multi_holo_arrays = [img_array]
+        self.original_multi_holo_arrays = [img_array.copy()]
+        self.arr_hologram = img_array
+
+        # (Opcional) reset de paneles si aplica en tu app
+        try:
+            self._reset_recon_panel()
+        except AttributeError:
+            pass
 
     # Check the radio button options for Numerical Propagation
     def on_np_source_changed(self, *_):
@@ -3511,18 +3873,38 @@ class App(ctk.CTk):
 
     # propagation parameters
     def update_propagation_params(self, *args):
-        """Handle changes in propagation method selection and update the parameter section."""
+        """Handle changes in propagation method selection (NP-only)."""
         metodo = self.prop_method_var.get()
         print(f"[DEBUG] Propagation method changed to: {metodo}")
 
-        # Common "Propagate" button
-        self.propagate_button = ctk.CTkButton(
-            self.params_np_frame,
-            width=PARAMETER_BUTTON_WIDTH,
-            text='Propagate',
-            command=self.run_propagation
-        )
-        self.propagate_button.grid(row=6, column=1, sticky='ew', padx=5, pady=(10, 10))
+        # ---- Botón "Propagate" dentro de params_np_frame (una sola vez) ----
+        try:
+            create_btn = (
+                    not hasattr(self, "propagate_button")
+                    or self.propagate_button is None
+                    or not self.propagate_button.winfo_exists()
+            )
+        except Exception:
+            create_btn = True
+
+        if create_btn:
+            self.propagate_button = ctk.CTkButton(
+                self.params_np_frame,
+                width=PARAMETER_BUTTON_WIDTH,
+                text="Propagate",
+                command=self.run_numerical_propagation,  # <<< flujo nuevo
+            )
+            # ajusta fila/col si usas otra distribución
+            self.propagate_button.grid(row=6, column=1, sticky="ew", padx=5, pady=(10, 10))
+        else:
+            # si ya existe, solo asegura el comando correcto
+            self.propagate_button.configure(command=self.run_numerical_propagation)
+
+        # ---- Cablea el botón "Apply" del NUEVO panel NP ----
+        if hasattr(self, "propagate_widgets_np") and isinstance(self.propagate_widgets_np, dict):
+            btn = self.propagate_widgets_np.get("np_propagation_apply_button")
+            if btn:
+                btn.configure(command=self.run_numerical_propagation)
 
     def get_value_in_micrometers(self, value, unit):
         conversion_factors = {

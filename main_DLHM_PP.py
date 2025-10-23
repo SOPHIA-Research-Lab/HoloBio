@@ -14,12 +14,6 @@ from importlib import import_module, reload
 import tools_GUI as tGUI
 import functions_GUI as fGUI
 import hashlib
-from tkinter import messagebox
-from multiprocessing import Queue, Process
-try:
- from parallel_rc import reconstruct_pp as _pp_target  # prefer PP-specific worker if present
-except Exception:
- from parallel_rc import reconstruct as _pp_target  # fallback to generic one
 
 
 class App(ctk.CTk):
@@ -319,6 +313,7 @@ class App(ctk.CTk):
         rgb = self._apply_ui_colormap(arr8u, ui_name)
         if rgb.ndim == 2:
             rgb = np.stack([rgb] * 3, axis=-1)
+        from PIL import Image
         return Image.fromarray(rgb.astype(np.uint8), mode="RGB")
 
     def _add_amplitude_filter_vars(self) -> None:
@@ -2018,6 +2013,13 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+        from multiprocessing import Queue, Process
+        # Import here so we can point DLHM_PP to a dedicated entry point
+        try:
+            from parallel_rc import reconstruct_pp as _pp_target  # prefer PP-specific worker if present
+        except Exception:
+            from parallel_rc import reconstruct as _pp_target  # fallback to generic one
+
         self.queue_manager["reconstruction"] = {
             "input": Queue(1),
             "output": Queue(1),
@@ -2448,6 +2450,7 @@ class App(ctk.CTk):
         DHM–offline style warning shown when trying to reconstruct without
         wavelength & pixel size.
         """
+        from tkinter import messagebox
         messagebox.showwarning(
             "Warning",
             "Reconstruction parameters (wavelength and pixel size) cannot be zero.\n"
