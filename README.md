@@ -123,4 +123,3 @@ If you use HoloBio in your research, please refer to the following manuscript:
 > **"HoloBio: A Holographic Microscopy Tool for Quantitative Biological Analysis"**  
 > *Under review, PLOS Computational Biology.*
 
-For more information, visit the [project repository](https://github.com/SOPHIA-Research-Lab/HoloBio).
