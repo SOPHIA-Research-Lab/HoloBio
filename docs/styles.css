@@ -258,3 +258,21 @@ footer {
     text-decoration: none;
     font-weight: bold;
 }
+
+/* --- FUNDING LIST --- */
+.funding-list {
+    list-style: none;
+    padding: 0;
+    font-size: 1.1rem;
+    color: #444;
+}
+
+.funding-list li {
+    margin-bottom: 15px;
+    padding: 10px;
+    background: white;
+    display: inline-block;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    width: 80%;
+}
