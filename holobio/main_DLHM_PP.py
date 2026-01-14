@@ -2577,7 +2577,7 @@ class App(ctk.CTk):
         self.destroy()
 
         # Replace 'main_menu' with the actual module name where MainMenu lives
-        main_mod = import_module("Main_")
+        main_mod = import_module("holobio.Main_")
         reload(main_mod)
 
         MainMenu = getattr(main_mod, "MainMenu")

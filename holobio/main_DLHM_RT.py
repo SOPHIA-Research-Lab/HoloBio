@@ -2765,7 +2765,7 @@ class App(ctk.CTk):
 
         # Tear down this window and open the external Main Menu
         self.destroy()
-        main_mod = import_module("Main_")
+        main_mod = import_module("holobio.Main_")
         reload(main_mod)
         MainMenu = getattr(main_mod, "MainMenu")
         MainMenu().mainloop()

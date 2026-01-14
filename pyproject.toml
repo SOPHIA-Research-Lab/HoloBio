@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "holoBio"
-version = "1.0.1"
+version = "1.0.2"
 description = "A comprehensive library for Digital Holographic Microscopy (DHM)"
 readme = "README.md"
 authors = [
