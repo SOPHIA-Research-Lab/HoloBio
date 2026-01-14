@@ -6,12 +6,7 @@
 
 HoloBio is an open-source Python library and GUI for quantitative analysis in Digital Holographic Microscopy (DHM). It supports real-time and offline modes, various optical setups (lens-based and lensless), and provides advanced tools for analyzing biological samples.
 
----
 
-    - particle tracking (Kalman filter)
-    - morphological analysis (segmentation, circularity, area)
-
----
 
 ## Installation
 
