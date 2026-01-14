@@ -262,19 +262,19 @@ class MainMenu(ctk.CTk):
     # Interface opening methods with improved error handling
     def open_interface1(self):
         """Open DHM Post-Processing interface"""
-        self.safe_interface_switch("main_DHM_PP", custom_message="Loading DHM offline module...")
+        self.safe_interface_switch("holobio.main_DHM_PP", custom_message="Loading DHM offline module...")
 
     def open_interface2(self):
         """Open DLHM Real-Time interface"""
-        self.safe_interface_switch("main_DLHM_RT", custom_message="Loading DLHM real-time module...")
+        self.safe_interface_switch("holobio.main_DLHM_RT", custom_message="Loading DLHM real-time module...")
 
     def open_interface3(self):
         """Open DLHM Post-Processing interface"""
-        self.safe_interface_switch("main_DLHM_PP", custom_message="Loading DLHM offline module...")
+        self.safe_interface_switch("holobio.main_DLHM_PP", custom_message="Loading DLHM offline module...")
 
     def open_interface4(self):
         """Open DHM Real-Time interface"""
-        self.safe_interface_switch("main_DHM_RT", custom_message="Loading DHM real-time module...")
+        self.safe_interface_switch("holobio.main_DHM_RT", custom_message="Loading DHM real-time module...")
 
 
 def main():

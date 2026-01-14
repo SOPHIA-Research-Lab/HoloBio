@@ -1,6 +1,6 @@
 # HoloBio: Digital Holographic Microscopy Library
 
-**Version:** 1.0.0
+**Version:** 1.0.1
 **Author:** SOPHIA-Research-Lab
 **License:** GPL-3.0
 
