@@ -3,6 +3,7 @@
 **Version:** 1.0.2
 **Author:** SOPHIA-Research-Lab
 **License:** GPL-3.0
+**Website:** [https://sophia-research-lab.github.io/HoloBio/](https://sophia-research-lab.github.io/HoloBio/)
 
 HoloBio is an open-source Python library and GUI for quantitative analysis in Digital Holographic Microscopy (DHM). It supports real-time and offline modes, various optical setups (lens-based and lensless), and provides advanced tools for analyzing biological samples.
 
