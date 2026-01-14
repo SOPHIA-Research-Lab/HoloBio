@@ -38,6 +38,12 @@ Once installed, you can launch the main graphical interface by running the follo
 holobio
 ```
 
+Or, if the command is not found (due to PATH issues):
+
+```bash
+python -m holobio
+```
+
 This will open the main menu where you can select between DHM and DLHM modes, and between Real-Time and Post-Processing interfaces.
 
 ---
