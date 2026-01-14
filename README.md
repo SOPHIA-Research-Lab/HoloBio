@@ -6,35 +6,7 @@
 
 HoloBio is an open-source Python library and GUI for quantitative analysis in Digital Holographic Microscopy (DHM). It supports real-time and offline modes, various optical setups (lens-based and lensless), and provides advanced tools for analyzing biological samples.
 
----
 
-## Features
-
-HoloBio offers two primary operational modes:
-
-- **Real-Time Mode:** Enables live acquisition and processing of holograms at video frame rates directly from a camera.
-- **Offline Mode:** Supports post-processing of previously recorded holograms (images or videos).
-
-### Optical System Compatibility
-
-Compatible with a wide range of optical configurations:
-- **Off-axis** (telecentric and non-telecentric)
-- **Slightly off-axis**
-- **In-line setups**
-
-### Key Analysis Tools
-
-- **Reconstruction:** Phase and Amplitude reconstruction using angular spectrum, Fresnel, or convolution methods.
-- **Phase Unwrapping:** Multiple algorithms including Volkov and custom weighted methods.
-- **Compensation:** Physical and numerical compensation algorithms (including Tu-DHM and Vortex-Legendre).
-- **Bio-Analysis:**
-    - refractive index estimation
-    - thickness measurements
-    - dry mass calculation
-    - particle tracking (Kalman filter)
-    - morphological analysis (segmentation, circularity, area)
-
----
 
 ## Installation
 
@@ -110,8 +82,8 @@ This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. 
 
 For more detailed information, please refer to the **User Guide** and **Scientific Paper** located in the `Complementary_info` directory of this repository:
 
-*   📄 **User Guide:** `Complementary_info/HoloBio User Guide_mj_wm_2908_rc0915_SOV1092025.docx` - Comprehensive manual covering installation, mode selection (Real-Time vs Offline), and advanced reconstruction procedures.
-*   📄 **Paper:** `Complementary_info/HoloBio_paper_rc0113_ct12142025_01122026ad.docx` - Detailed scientific background and validation of the tool.
+*   📄 **User Guide:** `Complementary_info/User_Manual.pdf` - Comprehensive manual covering installation, mode selection (Real-Time vs Offline), and advanced reconstruction procedures.
+*   📄 **Paper:** `Complementary_info/HoloBio_paper.pdf` - Detailed scientific background and validation of the tool.
 
 ## Support or Contact
 
