@@ -1,26 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HoloBio - Digital Holographic Microscopy Library</title>
+    <title>HoloBio - SOPHIA Research Group</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
 
-    <header class="hero">
-        <div class="container">
+    <!-- Header / Nav -->
+    <header id="main-header">
+        <div class="header-container">
+            <img src="img/SOHPIA.jpeg" alt="SOPHIA Research Group" class="logo-sophia">
+            <img src="img/Logo_EAFIT.png" alt="EAFIT University" class="logo-eafit">
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero-spacer"></section>
+    <section class="hero-content">
+        <div class="container text-center">
             <h1>HoloBio</h1>
             <p class="tagline">A comprehensive Python library for Digital Holographic Microscopy (DHM)</p>
             <div class="cta-buttons">
                 <a href="https://github.com/SOPHIA-Research-Lab/HoloBio" class="btn primary">View on GitHub</a>
                 <a href="#installation" class="btn secondary">Get Started</a>
             </div>
+
+            <!-- Screenshot -->
+            <div class="screenshot-container">
+                <img src="img/Screenshot 2026-01-13 183605.png" alt="HoloBio Interface Screenshot"
+                    class="app-screenshot">
+            </div>
         </div>
-    </header>
+    </section>
 
     <main>
         <section id="features" class="section">
@@ -29,15 +46,18 @@
                 <div class="grid">
                     <div class="card">
                         <h3>Real-Time Analysis</h3>
-                        <p>Live acquisition and processing of holograms at video frame rates directly from your camera.</p>
+                        <p>Live acquisition and processing of holograms at video frame rates directly from your camera.
+                        </p>
                     </div>
                     <div class="card">
                         <h3>Versatile Optics</h3>
-                        <p>Compatible with lens-based and lensless systems, off-axis, in-line, and telecentric setups.</p>
+                        <p>Compatible with lens-based and lensless systems, off-axis, in-line, and telecentric setups.
+                        </p>
                     </div>
                     <div class="card">
                         <h3>Bio-Analysis Tools</h3>
-                        <p>Advanced tools for particle tracking, refractive index estimation, and morphological analysis.</p>
+                        <p>Advanced tools for particle tracking, refractive index estimation, and morphological
+                            analysis.</p>
                     </div>
                 </div>
             </div>
@@ -49,12 +69,9 @@
                 <div class="code-block">
                     <pre><code>pip install holoBio</code></pre>
                 </div>
-                <p>Or install from source for development:</p>
-                <div class="code-block">
-                    <pre><code>git clone https://github.com/SOPHIA-Research-Lab/HoloBio.git
-cd HoloBio
-pip install .</code></pre>
-                </div>
+                <p>For more details, check the <a
+                        href="https://github.com/SOPHIA-Research-Lab/HoloBio/tree/main/Complementary_info">User
+                        Guide</a>.</p>
             </div>
         </section>
 
@@ -63,37 +80,40 @@ pip install .</code></pre>
                 <h2>Citation</h2>
                 <p>If you use HoloBio in your research, please cite our work:</p>
                 <blockquote>
-                    W. Mona, M. J. Gil-Herrera, E. Mazo, D. Córdoba, S. Obando, M. J. Lopera, R. Restrepo, C. Trujillo, A. Doblas, and R. Castañeda. <br>
+                    W. Mona, M. J. Gil-Herrera, E. Mazo, D. Córdoba, S. Obando, M. J. Lopera, R. Restrepo, C. Trujillo,
+                    A. Doblas, and R. Castañeda. <br>
                     <strong>"HoloBio: A Holographic Microscopy Tool for Quantitative Biological Analysis"</strong><br>
                     <em>Under review, PLOS Computational Biology.</em>
                 </blockquote>
             </div>
         </section>
-
-        <section id="contact" class="section bg-light">
-            <div class="container">
-                <h2>Contact</h2>
-                <div class="contact-grid">
-                    <div class="contact-item">
-                        <strong>Ana Doblas</strong><br>
-                        adoblas@umassd.edu<br>
-                        <a href="https://scholar.google.es/citations?user=PvvDEMYAAAAJ&hl=en">Google Scholar</a>
-                    </div>
-                    <div class="contact-item">
-                        <strong>Raul Castañeda</strong><br>
-                        racastaneq@eafit.edu.co<br>
-                        <a href="https://scholar.google.com/citations?user=RBtkL1oAAAAJ&hl=es">Google Scholar</a>
-                    </div>
-                </div>
-            </div>
-        </section>
     </main>
 
     <footer>
-        <div class="container">
+        <div class="container footer-content">
+            <div class="footer-logos">
+                <img src="img/SOHPIA.jpeg" alt="SOPHIA Research Group">
+                <img src="img/Logo_EAFIT.png" alt="EAFIT University">
+            </div>
             <p>&copy; 2026 SOPHIA Research Lab. Licensed under GPL-3.0.</p>
+            <div class="footer-contacts">
+                <p>Contact: <a href="mailto:racastaneq@eafit.edu.co" style="color:white;">racastaneq@eafit.edu.co</a>
+                </p>
+            </div>
         </div>
     </footer>
 
+    <script>
+        // Scroll Effect Script
+        window.addEventListener('scroll', function () {
+            const header = document.getElementById('main-header');
+            if (window.scrollY > 50) {
+                header.classList.add('scrolled');
+            } else {
+                header.classList.remove('scrolled');
+            }
+        });
+    </script>
 </body>
+
 </html>

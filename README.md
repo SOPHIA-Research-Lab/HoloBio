@@ -106,6 +106,13 @@ The source code is organized in the `holobio/` package directory:
 
 This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. See the `LICENSE` file for details.
 
+## Additional Resources
+
+For more detailed information, please refer to the **User Guide** and **Scientific Paper** located in the `Complementary_info` directory of this repository:
+
+*   📄 **User Guide:** `Complementary_info/HoloBio User Guide_mj_wm_2908_rc0915_SOV1092025.docx` - Comprehensive manual covering installation, mode selection (Real-Time vs Offline), and advanced reconstruction procedures.
+*   📄 **Paper:** `Complementary_info/HoloBio_paper_rc0113_ct12142025_01122026ad.docx` - Detailed scientific background and validation of the tool.
+
 ## Support or Contact
 
 If you have any questions or need support, please contact:
