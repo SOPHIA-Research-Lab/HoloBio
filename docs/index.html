@@ -84,56 +84,51 @@
         <section id="tutorials" class="section">
             <div class="container">
                 <h2>Video Tutorials</h2>
-                <div class="grid video-grid">
-                    <!-- Video 1 -->
-                    <div class="card video-card">
+                <div class="video-layout">
+                    <!-- Main Player -->
+                    <div class="main-video-area">
                         <div class="video-container">
-                            <iframe src="https://www.youtube.com/embed/tdSTnbEJIGo" title="Real-Time DHM Workflow"
-                                frameborder="0"
+                            <iframe id="main-video-frame" src="https://www.youtube.com/embed/tdSTnbEJIGo"
+                                title="Real-Time DHM Workflow" frameborder="0"
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                 allowfullscreen></iframe>
                         </div>
-                        <h3>Real-Time DHM Workflow</h3>
+                        <h3 id="main-video-title" class="video-title">Real-Time DHM Workflow</h3>
                     </div>
-                    <!-- Video 2 -->
-                    <div class="card video-card">
-                        <div class="video-container">
-                            <iframe src="https://www.youtube.com/embed/GxsejY7T7Fo" title="Offline DLHM Workflow"
-                                frameborder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowfullscreen></iframe>
-                        </div>
-                        <h3>Offline DLHM Workflow</h3>
-                    </div>
-                    <!-- Video 3 -->
-                    <div class="card video-card">
-                        <div class="video-container">
-                            <iframe src="https://www.youtube.com/embed/zwP4dBpSZdc"
-                                title="Phase-Shifting Reconstruction" frameborder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowfullscreen></iframe>
-                        </div>
-                        <h3>Phase-Shifting Reconstruction</h3>
-                    </div>
-                    <!-- Video 4 -->
-                    <div class="card video-card">
-                        <div class="video-container">
-                            <iframe src="https://www.youtube.com/embed/tyop_0fGQH0"
-                                title="Phase-Compensation Reconstruction" frameborder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowfullscreen></iframe>
-                        </div>
-                        <h3>Phase-Compensation</h3>
-                    </div>
-                    <!-- Video 5 -->
-                    <div class="card video-card" style="grid-column: 1 / -1; max-width: 600px; margin: 0 auto;">
-                        <div class="video-container">
-                            <iframe src="https://www.youtube.com/embed/n-xLbzZvRtU"
-                                title="Bio-Analysis Toolkit User Guide" frameborder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowfullscreen></iframe>
-                        </div>
-                        <h3>Bio-Analysis Toolkit User Guide</h3>
+
+                    <!-- Playlist Menu -->
+                    <div class="video-playlist">
+                        <div class="playlist-header">Select a Topic</div>
+
+                        <button class="playlist-item active"
+                            onclick="changeVideo('https://www.youtube.com/embed/tdSTnbEJIGo', 'Real-Time DHM Workflow', this)">
+                            <span class="play-icon">▶</span>
+                            DHM Workflow (Real-Time)
+                        </button>
+
+                        <button class="playlist-item"
+                            onclick="changeVideo('https://www.youtube.com/embed/GxsejY7T7Fo', 'Offline DLHM Workflow', this)">
+                            <span class="play-icon">▶</span>
+                            DLHM Workflow (Offline)
+                        </button>
+
+                        <button class="playlist-item"
+                            onclick="changeVideo('https://www.youtube.com/embed/zwP4dBpSZdc', 'Phase-Shifting Reconstruction', this)">
+                            <span class="play-icon">▶</span>
+                            Phase-Shifting
+                        </button>
+
+                        <button class="playlist-item"
+                            onclick="changeVideo('https://www.youtube.com/embed/tyop_0fGQH0', 'Phase-Compensation Reconstruction', this)">
+                            <span class="play-icon">▶</span>
+                            Phase-Compensation
+                        </button>
+
+                        <button class="playlist-item"
+                            onclick="changeVideo('https://www.youtube.com/embed/n-xLbzZvRtU', 'Bio-Analysis Toolkit User Guide', this)">
+                            <span class="play-icon">▶</span>
+                            Bio-Analysis User Guide
+                        </button>
                     </div>
                 </div>
             </div>
@@ -196,6 +191,18 @@
                 header.classList.remove('scrolled');
             }
         });
+
+        // Video Playlist Script
+        function changeVideo(url, title, element) {
+            // Update Iframe and Title
+            document.getElementById('main-video-frame').src = url;
+            document.getElementById('main-video-title').textContent = title;
+
+            // Update Active Class
+            const items = document.querySelectorAll('.playlist-item');
+            items.forEach(item => item.classList.remove('active'));
+            element.classList.add('active');
+        }
     </script>
 </body>
 
