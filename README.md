@@ -86,10 +86,9 @@ This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. 
 
 ## Additional Resources
 
-For more detailed information, please refer to the **User Guide** and **Scientific Paper** located in the `Complementary_info` directory of this repository:
+For more detailed information, please refer to the **User Guide** located in the `Complementary_info` directory of this repository:
 
-*   📄 **User Guide:** `Complementary_info/User_Manual.pdf` - Comprehensive manual covering installation, mode selection (Real-Time vs Offline), and advanced reconstruction procedures.
-*   📄 **Paper:** `Complementary_info/HoloBio_paper.pdf` - Detailed scientific background and validation of the tool.
+*   📄 **User Guide:** [Complementary_info/User_Manual.pdf](Complementary_info/User_Manual.pdf) - Comprehensive manual covering installation, mode selection (Real-Time vs Offline), and advanced reconstruction procedures.
 
 ## Support or Contact
 
