@@ -7,9 +7,9 @@ from tkinter import filedialog, messagebox
 from importlib import import_module, reload
 import cv2
 import matplotlib.pyplot as plt
-from settingsCompensation import create_compensation_settings
-from unwrap_methods import apply_unwrap
-from pyDHM_methods import angularSpectrum, fresnel
+from .settingsCompensation import create_compensation_settings
+from .unwrap_methods import apply_unwrap
+from .pyDHM_methods import angularSpectrum, fresnel
 
 # Third-Party Libraries
 import customtkinter as ctk
@@ -18,17 +18,14 @@ from PIL import ImageTk
 from pandastable import Table
 
 # Custom Modules
-import pyDHM_methods as pyDHM
-import functions_GUI as fGUI
-import tools_GUI as tGUI
-from pyDHM_methods import spatialFilteringCF, draw_manual_circle, draw_manual_rectangle
-from parallel_rc import *
-from phaseShifting import PS5, PS4, PS3, SOSR, BPS2, BPS3
+from . import pyDHM_methods as pyDHM
+from . import functions_GUI as fGUI
+from . import tools_GUI as tGUI
+from .pyDHM_methods import spatialFilteringCF, draw_manual_circle, draw_manual_rectangle
+from .parallel_rc import *
+from .phaseShifting import PS5, PS4, PS3, SOSR, BPS2, BPS3
 
-try:
-    import utilities as ut
-except ImportError:
-    import utilities as ut
+from . import utilities as ut
 
 
 class App(ctk.CTk):

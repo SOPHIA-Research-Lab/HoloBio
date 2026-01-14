@@ -1,0 +1,278 @@
+:root {
+    /* Softer Blue Palette */
+    --primary-color: #5DADE2;
+    /* Soft Blue */
+    --secondary-color: #2E86C1;
+    /* Stronger but soft Blue */
+    --accent-color: #AED6F1;
+    /* Light Blue */
+    --light-bg: #F0F8FF;
+    /* Alice Blue */
+    --text-color: #2c3e50;
+
+    --header-height: 15vh;
+    --header-scrolled-height: 70px;
+}
+
+body {
+    margin: 0;
+    font-family: 'Roboto', sans-serif;
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+/* --- HEADER STYLES --- */
+#main-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: var(--header-height);
+    background-color: var(--primary-color);
+    /* Match Hero initially */
+    z-index: 1000;
+    transition: all 0.8s cubic-bezier(0.25, 0.8, 0.25, 1);
+    /* Smoother transition */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+    /* No shadow initially for seamless look */
+}
+
+.header-container {
+    width: 100%;
+    max-width: 1200px;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    height: 100%;
+    transition: all 0.8s ease;
+}
+
+.logo-sophia {
+    height: 12vh;
+    transition: all 0.8s cubic-bezier(0.25, 0.8, 0.25, 1);
+    border-radius: 5px;
+    /* Soften edges if it has a background */
+    mix-blend-mode: multiply;
+    /* Attempt to blend white bg if possible */
+}
+
+/* --- SCROLLED STATE --- */
+#main-header.scrolled {
+    height: var(--header-scrolled-height);
+    background-color: rgba(255, 255, 255, 0.98);
+    /* Become white/glassy on scroll */
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
+
+#main-header.scrolled .header-container {
+    justify-content: flex-start;
+    /* Move to left */
+}
+
+#main-header.scrolled .logo-sophia {
+    height: 50px;
+    margin-right: auto;
+    mix-blend-mode: normal;
+    /* Restore normal blend on white header */
+}
+
+/* --- HERO SECTION --- */
+.hero-spacer {
+    height: var(--header-height);
+    background-color: var(--primary-color);
+    /* Fill the gap */
+}
+
+.hero-content {
+    /* Soft Blue Gradient */
+    background: linear-gradient(180deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: white;
+    padding: 40px 0 80px 0;
+    text-align: center;
+}
+
+.hero-content h1 {
+    font-size: 3.5rem;
+    margin-bottom: 10px;
+    font-weight: 300;
+}
+
+.tagline {
+    font-size: 1.4rem;
+    font-weight: 300;
+    margin-bottom: 40px;
+    opacity: 0.9;
+}
+
+.screenshot-container {
+    margin-top: 50px;
+    perspective: 1000px;
+}
+
+.app-screenshot {
+    max-width: 85%;
+    border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+    transition: transform 0.5s ease;
+}
+
+.app-screenshot:hover {
+    transform: translateY(-5px);
+}
+
+/* --- GENERAL --- */
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.section {
+    padding: 80px 0;
+}
+
+.bg-light {
+    background-color: var(--light-bg);
+}
+
+.btn {
+    display: inline-block;
+    padding: 12px 35px;
+    border-radius: 30px;
+    /* Pillow buttons */
+    text-decoration: none;
+    font-weight: 500;
+    margin: 10px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.btn.primary {
+    background: white;
+    color: var(--secondary-color);
+}
+
+.btn.primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+}
+
+.btn.secondary {
+    background: transparent;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    color: white;
+}
+
+.btn.secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+h2 {
+    text-align: center;
+    margin-bottom: 50px;
+    color: var(--secondary-color);
+    font-weight: 300;
+    font-size: 2.5rem;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 40px;
+}
+
+.card {
+    background: white;
+    padding: 40px 30px;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+    text-align: center;
+    transition: transform 0.3s;
+    border-top: 5px solid var(--accent-color);
+}
+
+.card:hover {
+    transform: translateY(-10px);
+}
+
+.card h3 {
+    color: var(--secondary-color);
+    margin-bottom: 15px;
+}
+
+.code-block {
+    background: #2c3e50;
+    color: #ecf0f1;
+    padding: 25px;
+    border-radius: 10px;
+    max-width: 650px;
+    margin: 30px auto;
+    overflow-x: auto;
+    font-family: 'Consolas', monospace;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+blockquote {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 30px;
+    background: white;
+    border-left: 5px solid var(--primary-color);
+    border-radius: 0 10px 10px 0;
+    font-style: italic;
+    color: #555;
+}
+
+/* --- FOOTER --- */
+footer {
+    background-color: var(--secondary-color);
+    /* Footer matches theme */
+    color: white;
+    padding: 60px 0;
+    text-align: center;
+}
+
+.footer-logos {
+    margin-bottom: 30px;
+}
+
+.footer-logos img {
+    height: 60px;
+    border-radius: 5px;
+    background: white;
+    /* Ensure logo visible on blue */
+    padding: 5px;
+}
+
+.footer-contacts a {
+    color: var(--accent-color);
+    text-decoration: none;
+    font-weight: bold;
+}
+
+/* --- FUNDING LIST --- */
+.funding-list {
+    list-style: none;
+    padding: 0;
+    font-size: 1.1rem;
+    color: #444;
+}
+
+.funding-list li {
+    margin-bottom: 15px;
+    padding: 10px;
+    background: white;
+    display: inline-block;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    width: 80%;
+}

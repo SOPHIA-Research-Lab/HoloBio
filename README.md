@@ -1,5 +1,10 @@
-# HoloBio
-HoloBio is an open-source Python GUI for quantitative analysis in Digital Holographic Microscopy. It supports real-time and offline modes, various optical setups, and offers tools for analyzing biological samples.
+# HoloBio: Digital Holographic Microscopy Library
+
+**Version:** 1.0.0
+**Author:** SOPHIA-Research-Lab
+**License:** GPL-3.0
+
+HoloBio is an open-source Python library and GUI for quantitative analysis in Digital Holographic Microscopy (DHM). It supports real-time and offline modes, various optical setups (lens-based and lensless), and provides advanced tools for analyzing biological samples.
 
 ---
 
@@ -7,60 +12,121 @@ HoloBio is an open-source Python GUI for quantitative analysis in Digital Hologr
 
 HoloBio offers two primary operational modes:
 
-- **Real-Time Mode:** Enables live acquisition and processing of holograms at video frame rates.
+- **Real-Time Mode:** Enables live acquisition and processing of holograms at video frame rates directly from a camera.
+- **Offline Mode:** Supports post-processing of previously recorded holograms (images or videos).
 
-- **Offline Mode:** Supports post-processing of previously recorded holograms.
+### Optical System Compatibility
 
----
+Compatible with a wide range of optical configurations:
+- **Off-axis** (telecentric and non-telecentric)
+- **Slightly off-axis**
+- **In-line setups**
 
-## Optical System Compatibility
+### Key Analysis Tools
 
-HoloBio-GUI is compatible with both **lens-based** and **lensless** DHM systems. It supports a wide range of optical configurations, including:
-
-- Off-axis (telecentric and non-telecentric)
-- Slightly off-axis
-- In-line setups
-
----
-
-## Key Tools
-
-- Particle tracking  
-- Micrometric measurements  
-- Phase profile extraction  
-- Thickness and refractive index estimation  
-- Morphological analysis (e.g., cell counting, particle area quantification)
-
----
-
-## Who Is It For?
-
-Designed for ease of use, **HoloBio** requires **no programming skills**. It provides a **reproducible, high-throughput environment**, making it ideal for researchers in:
-
-- Biology  
-- Biophotonics  
-- Biomedical imaging  
+- **Reconstruction:** Phase and Amplitude reconstruction using angular spectrum, Fresnel, or convolution methods.
+- **Phase Unwrapping:** Multiple algorithms including Volkov and custom weighted methods.
+- **Compensation:** Physical and numerical compensation algorithms (including Tu-DHM and Vortex-Legendre).
+- **Bio-Analysis:**
+    - refractive index estimation
+    - thickness measurements
+    - dry mass calculation
+    - particle tracking (Kalman filter)
+    - morphological analysis (segmentation, circularity, area)
 
 ---
 
 ## Installation
 
-Coming soon...
+You can install `holoBio` directly from PyPI (Python 3.8+ required):
+
+```bash
+pip install holoBio
+```
+
+Alternatively, to install from source:
+
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/SOPHIA-Research-Lab/HoloBio.git
+    cd HoloBio
+    ```
+2.  Install dependencies and the package:
+    ```bash
+    pip install .
+    ```
+
+---
+
+## Usage
+
+Once installed, you can launch the main graphical interface by running the following command in your terminal:
+
+```bash
+holobio
+```
+
+This will open the main menu where you can select between DHM and DLHM modes, and between Real-Time and Post-Processing interfaces.
+
+---
+
+## Project Structure
+
+The source code is organized in the `holobio/` package directory:
+
+### Core Application
+- **`Main_.py`**: The entry point of the application. Initializes the main menu window and handles navigation between different modules.
+- **`__init__.py`**: Marks the directory as a Python package.
+
+### Main Interfaces (GUI)
+- **`main_DHM_PP.py`**: **DHM Post-Processing**. Interface for loading and analyzing existing holograms.
+- **`main_DHM_RT.py`**: **DHM Real-Time**. Interface for capturing and analyzing holograms live from a camera.
+- **`main_DLHM_PP.py`**: **DLHM Post-Processing**. Specialized interface for Lensless Digital Holographic Microscopy (offline).
+- **`main_DLHM_RT.py`**: **DLHM Real-Time**. Specialized interface for Lensless Digital Holographic Microscopy (live).
+
+### Algorithms & Methods
+- **`pyDHM_methods.py`**: Core numerical methods for reconstruction, propagation, and filtering.
+- **`phaseShifting.py`**: Implementation of phase-shifting algorithms for phase retrieval.
+- **`unwrap_methods.py`**: Wrapper functions for different phase unwrapping techniques.
+- **`unwrapping.py`**: Implementation of specific phase unwrapping algorithms (e.g., weighted least squares).
+- **`settingsCompensation.py`**: GUI and logic for configuring phase compensation parameters (e.g., for tilt/aberration removal).
+- **`parallel_rc.py`**: Parallel processing implementations for faster reconstruction.
+- **`track_particles_kalman.py`**: Kalman filter implementation for tracking moving particles in real-time or video sequences.
+
+### Utilities
+- **`tools_GUI.py`**: Common GUI widgets, dialogs, and helper functions reused across different interfaces.
+- **`functions_GUI.py`**: Additional functional logic for GUI interactions.
+- **`tools_microstructure.py`**: Tools for morphological analysis (segmentation, particle counting, area measurement).
+- **`utilities.py`**: General purpose utility functions (image I/O, array manipulation).
+- **`settings.py`**: Global configuration and constants.
 
 ---
 
 ## License
 
-Coming soon...
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. See the `LICENSE` file for details.
 
----
-## Citations
+## Additional Resources
 
-Coming soon...
+For more detailed information, please refer to the **User Guide** and **Scientific Paper** located in the `Complementary_info` directory of this repository:
 
----
+*   📄 **User Guide:** `Complementary_info/HoloBio User Guide_mj_wm_2908_rc0915_SOV1092025.docx` - Comprehensive manual covering installation, mode selection (Real-Time vs Offline), and advanced reconstruction procedures.
+*   📄 **Paper:** `Complementary_info/HoloBio_paper_rc0113_ct12142025_01122026ad.docx` - Detailed scientific background and validation of the tool.
 
-## Authors
+## Support or Contact
 
-Coming soon...
+If you have any questions or need support, please contact:
+
+| Researcher | Email | Google Scholar |
+| :--- | :--- | :--- |
+| **Ana Doblas** | adoblas@umassd.edu | [Profile](https://scholar.google.es/citations?user=PvvDEMYAAAAJ&hl=en) |
+| **Raul Castañeda** | racastaneq@eafit.edu.co | [Profile](https://scholar.google.com/citations?user=RBtkL1oAAAAJ&hl=es) |
+
+## Citation
+
+If you use HoloBio in your research, please refer to the following manuscript:
+
+> W. Mona, M. J. Gil-Herrera, E. Mazo, D. Córdoba, S. Obando, M. J. Lopera, R. Restrepo, C. Trujillo, A. Doblas, and R. Castañeda.  
+> **"HoloBio: A Holographic Microscopy Tool for Quantitative Biological Analysis"**  
+> *Under review, PLOS Computational Biology.*
 

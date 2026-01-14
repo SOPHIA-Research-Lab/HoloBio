@@ -3,7 +3,7 @@ import customtkinter as ctk
 import os
 from multiprocessing import Process
 from matplotlib import colormaps as mpl_cmaps
-from parallel_rc import *
+from .parallel_rc import *
 from PIL import ImageTk, Image
 from scipy import ndimage
 import tkinter as tk
@@ -11,8 +11,8 @@ from matplotlib.widgets import RectangleSelector
 import warnings
 import matplotlib.pyplot as plt
 from importlib import import_module, reload
-import tools_GUI as tGUI
-import functions_GUI as fGUI
+from . import tools_GUI as tGUI
+from . import functions_GUI as fGUI
 import hashlib
 
 

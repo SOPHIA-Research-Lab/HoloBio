@@ -277,6 +277,9 @@ class MainMenu(ctk.CTk):
         self.safe_interface_switch("main_DHM_RT", custom_message="Loading DHM real-time module...")
 
 
-if __name__ == "__main__":
+def main():
     app = MainMenu()
     app.mainloop()
+
+if __name__ == "__main__":
+    main()

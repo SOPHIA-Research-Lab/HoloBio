@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HoloBio - SOPHIA Research Group</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- Header / Nav -->
+    <header id="main-header">
+        <div class="header-container">
+            <img src="img/Sophia_svg.svg" alt="SOPHIA Research Group" class="logo-sophia">
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero-spacer"></section>
+    <section class="hero-content">
+        <div class="container text-center">
+            <h1>HoloBio</h1>
+            <p class="tagline">A comprehensive Python library for Digital Holographic Microscopy (DHM)</p>
+            <div class="cta-buttons">
+                <a href="https://github.com/SOPHIA-Research-Lab/HoloBio" class="btn primary">View on GitHub</a>
+                <a href="#installation" class="btn secondary">Get Started</a>
+            </div>
+
+            <!-- Screenshot -->
+            <div class="screenshot-container">
+                <img src="img/Screenshot 2026-01-13 183605.png" alt="HoloBio Interface Screenshot"
+                    class="app-screenshot">
+            </div>
+        </div>
+    </section>
+
+    <main>
+        <section id="what-it-does" class="section">
+            <div class="container">
+                <h2>What it does</h2>
+                <div class="grid">
+                    <div class="card">
+                        <h3>DHM Reconstruction</h3>
+                        <p>Support for off-axis telecentric, non-telecentric, and other configurations.</p>
+                    </div>
+                    <div class="card">
+                        <h3>DLHM Reconstruction</h3>
+                        <p>Methods including Angular Spectrum, KHDI, and Multi-Angle Scanning (MAS).</p>
+                    </div>
+                    <div class="card">
+                        <h3>Flexible Modes</h3>
+                        <p>Operate in <strong>Real-Time</strong> (video-rate) or <strong>Offline</strong>
+                            post-processing modes.</p>
+                    </div>
+                    <div class="card">
+                        <h3>Tools</h3>
+                        <p>Tracking, phase profiles, thickness estimation, counting, area quantification, filters, and
+                            speckle toolkit.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="installation" class="section bg-light">
+            <div class="container">
+                <h2>Installation</h2>
+                <div class="code-block">
+                    <pre><code>pip install holoBio</code></pre>
+                </div>
+                <p>For more details, check the <a
+                        href="https://github.com/SOPHIA-Research-Lab/HoloBio/tree/main/Complementary_info">User
+                        Guide</a>.</p>
+            </div>
+        </section>
+
+        <section id="citation" class="section">
+            <div class="container">
+                <h2>Citation</h2>
+                <p>If you use HoloBio in your research, please cite our work:</p>
+                <blockquote>
+                    W. Mona, M. J. Gil-Herrera, E. Mazo, D. Córdoba, S. Obando, M. J. Lopera, R. Restrepo, C. Trujillo,
+                    A. Doblas, and R. Castañeda. <br>
+                    <strong>"HoloBio: A Holographic Microscopy Tool for Quantitative Biological Analysis"</strong><br>
+                    <em>Under review, PLOS Computational Biology.</em>
+                </blockquote>
+            </div>
+        </section>
+        <section id="funding" class="section bg-light">
+            <div class="container text-center">
+                <h2>Funding</h2>
+                <ul class="funding-list">
+                    <li>The Vicerrectoría de Ciencia, Tecnología e Innovación, Universidad EAFIT.</li>
+                    <li>National Science Foundation (Grants 2042563 and 2404769).</li>
+                </ul>
+            </div>
+        </section>
+
+        <section id="acknowledgment" class="section">
+            <div class="container text-center">
+                <h2>Acknowledgment</h2>
+                <p style="max-width: 800px; margin: 0 auto; color: #555;">
+                    The authors also express their gratitude to all previous contributors and collaborators whose prior
+                    work laid the groundwork for the present work, although they were not directly involved in the
+                    development of HoloBio.
+                </p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container footer-content">
+            <div class="footer-logos">
+                <img src="img/Sophia_svg.svg" alt="SOPHIA Research Group">
+            </div>
+            <p>&copy; 2026 SOPHIA Research Lab. Licensed under GPL-3.0.</p>
+            <div class="footer-contacts">
+                <p>Contact: <a href="mailto:racastaneq@eafit.edu.co" style="color:white;">racastaneq@eafit.edu.co</a>
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Scroll Effect Script
+        window.addEventListener('scroll', function () {
+            const header = document.getElementById('main-header');
+            if (window.scrollY > 50) {
+                header.classList.add('scrolled');
+            } else {
+                header.classList.remove('scrolled');
+            }
+        });
+    </script>
+</body>
+
+</html>
