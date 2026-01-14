@@ -274,3 +274,39 @@ footer {
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
     width: 80%;
 }
+
+/* --- VIDEO GRID --- */
+.video-grid {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    /* Wider cards for videos */
+}
+
+.video-card {
+    padding: 20px;
+    /* Less padding for video cards */
+    text-align: left;
+}
+
+.video-card h3 {
+    margin-top: 15px;
+    font-size: 1.1rem;
+    text-align: center;
+}
+
+.video-container {
+    position: relative;
+    padding-bottom: 56.25%;
+    /* 16:9 Aspect Ratio */
+    height: 0;
+    overflow: hidden;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.video-container iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
