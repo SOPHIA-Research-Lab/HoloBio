@@ -8,29 +8,6 @@ HoloBio is an open-source Python library and GUI for quantitative analysis in Di
 
 ---
 
-## Features
-
-HoloBio offers two primary operational modes:
-
-- **Real-Time Mode:** Enables live acquisition and processing of holograms at video frame rates directly from a camera.
-- **Offline Mode:** Supports post-processing of previously recorded holograms (images or videos).
-
-### Optical System Compatibility
-
-Compatible with a wide range of optical configurations:
-- **Off-axis** (telecentric and non-telecentric)
-- **Slightly off-axis**
-- **In-line setups**
-
-### Key Analysis Tools
-
-- **Reconstruction:** Phase and Amplitude reconstruction using angular spectrum, Fresnel, or convolution methods.
-- **Phase Unwrapping:** Multiple algorithms including Volkov and custom weighted methods.
-- **Compensation:** Physical and numerical compensation algorithms (including Tu-DHM and Vortex-Legendre).
-- **Bio-Analysis:**
-    - refractive index estimation
-    - thickness measurements
-    - dry mass calculation
     - particle tracking (Kalman filter)
     - morphological analysis (segmentation, circularity, area)
 
