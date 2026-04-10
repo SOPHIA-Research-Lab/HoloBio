@@ -582,7 +582,7 @@ def reconstruct_pp(queue_manager: dict[str, dict[str, "Queue"]]) -> None:
             W_c = dxy * holo_u8.shape[1]
             amp_f, phase_f = dlhm_rec(holo_u8, L, Z, W_c, dxy, wl)
 
-        # --- 6) GUI-friendly 8-bit buffers ---
+        # GUI
         amp_arr = normalize(amp_f, 255).astype(np.uint8)
         int_arr = normalize(amp_f ** 2, 255).astype(np.uint8)
         phase_arr = normalize(((phase_f + np.pi) % (2 * np.pi)) - np.pi, 255).astype(np.uint8)
