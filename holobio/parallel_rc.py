@@ -3,7 +3,7 @@ import time
 from customtkinter import CTkImage
 from multiprocessing import Queue
 import cv2 as cv
-from settings import *
+from .settings import *
 from PIL import Image
 import hashlib
 from functools import lru_cache

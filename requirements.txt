@@ -1,0 +1,10 @@
+numpy
+Pillow
+matplotlib
+imageio
+scikit-image
+scipy
+opencv-python
+pandas
+customtkinter
+pandastable

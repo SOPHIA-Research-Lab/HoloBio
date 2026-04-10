@@ -3,7 +3,7 @@
 import customtkinter as ctk
 import os
 from multiprocessing import Process
-from parallel_rc import *
+from .parallel_rc import *
 from PIL import ImageTk, Image
 from scipy import ndimage
 import tkinter as tk
@@ -11,8 +11,8 @@ from tkinter import filedialog, messagebox
 import warnings
 import matplotlib.pyplot as plt
 from importlib import import_module, reload
-import tools_GUI as tGUI
-import functions_GUI as fGUI
+from . import tools_GUI as tGUI
+from . import functions_GUI as fGUI
 import cv2 as cv
 from pathlib import Path
 import platform
@@ -2765,7 +2765,7 @@ class App(ctk.CTk):
 
         # Tear down this window and open the external Main Menu
         self.destroy()
-        main_mod = import_module("Main_")
+        main_mod = import_module("holobio.Main_")
         reload(main_mod)
         MainMenu = getattr(main_mod, "MainMenu")
         MainMenu().mainloop()
