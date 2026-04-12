@@ -1,0 +1,10 @@
+Paramecium hologram — Kreuzer method
+
+Wavelength: 0.532 µm
+Pixel size (dxy): 6.9 µm
+Source-to-camera distance (L): 20 mm
+
+This example contains three reconstructed views of the same hologram, each focused at a different reconstruction distance (z):
+Middle paramecium: z = 6.8 mm
+Lower paramecium: z = 5.6 mm
+Upper paramecium: z = 2.8 mm

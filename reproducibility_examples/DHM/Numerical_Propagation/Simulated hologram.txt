@@ -1,0 +1,5 @@
+Simulated hologram
+
+Focal distance: 8 mm
+Wavelength: 633 nm
+Pixel size (dxy): 3.75 µm

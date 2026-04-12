@@ -1,0 +1,6 @@
+Target hologram — Angular Spectrum DLHM method
+
+Wavelength: 0.532 µm
+Pixel size (dxy): 1.85 µm
+L distance: 10 mm
+Z distance: 2 mm
