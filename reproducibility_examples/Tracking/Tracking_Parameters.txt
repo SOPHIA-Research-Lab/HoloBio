@@ -1,0 +1,13 @@
+- RBC_10x_15fps_2:
+
+Wavelength: 0.633um
+Pitch X: 3.75um
+Pitch Y: 3.75um
+MO: 10x
+Filter Method: Gaussian
+Color filtering activate - Blob color 255 (white sample)
+Min Area: 150 
+Max Area: 500
+Kalman P: 100
+Kalman Q: 0.01
+Kalman R: 1
