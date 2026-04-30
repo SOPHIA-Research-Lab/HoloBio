@@ -1,20 +1,37 @@
 
 import zipfile, io
+import os
+import sys
+from pathlib import Path
+
 import customtkinter as ctk
-from .parallel_rc import *
+
+if __package__ is None or __package__ == "":
+    _THIS_FILE = Path(__file__).resolve()
+    _PACKAGE_DIR = _THIS_FILE.parent
+    _PROJECT_ROOT = _PACKAGE_DIR.parent
+
+    if str(_PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PROJECT_ROOT))
+
+    from holobio.parallel_rc import *
+    from holobio import functions_GUI as fGUI
+    from holobio.track_particles_kalman import track_particles_kalman as track
+else:
+    from .parallel_rc import *
+    from . import functions_GUI as fGUI
+    from .track_particles_kalman import track_particles_kalman as track
+
 from PIL import ImageTk, Image
 from tkinter import filedialog, messagebox
 import math
-import cv2, os, time, tkinter as tk
+import cv2, time, tkinter as tk
 from importlib import import_module, reload
-from . import functions_GUI as fGUI
 import threading, queue
 from pandastable.core import Table
 import pandas as pd
 import re
-from .track_particles_kalman import track_particles_kalman as track
 from scipy.ndimage import median_filter
-
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -1121,15 +1138,13 @@ class App(ctk.CTk):
                 and model.get("filter_type") == filter_type
             )
 
-            if model_is_usable and model.get("fast_spectral_crop", False) and model.get("bbox", None) is not None:
-                y1, y2, x1, x2 = model["bbox"]
+            if model_is_usable and model.get("fast_spectral_crop", False) and model.get("crop_model", None) is not None:
                 mask_crop = model.get("mask_crop", None)
-                ft_filtered_full = np.zeros_like(ft_raw)
-                ft_crop = ft_raw[y1:y2, x1:x2]
-                if mask_crop is not None:
-                    ft_crop = ft_crop * mask_crop
-                ft_filtered_full[y1:y2, x1:x2] = ft_crop
-                ft_filtered = ft_filtered_full
+                crop_model = model.get("crop_model", None)
+                if mask_crop is not None and crop_model is not None:
+                    ft_filtered = self._vl_expand_crop_to_full_spectrum(ft_raw, crop_model, mask_crop)
+                else:
+                    ft_filtered = np.zeros_like(ft_raw)
 
             elif model_is_usable and model.get("mask", None) is not None:
                 ft_filtered = ft_raw * model["mask"]
@@ -1433,6 +1448,7 @@ class App(ctk.CTk):
             return {"holo": holo_u8, "ft": ft_u8, "ft_unfiltered": ft_u8, "amp": black, "phase": black}
 
 
+
     def _get_vortex_legendre_default_settings(self) -> dict:
         """Define numerical settings for the real-time reconstruction protocol."""
         filter_type = getattr(self, "selected_filter_type", "Circular")
@@ -1455,9 +1471,20 @@ class App(ctk.CTk):
             "model_update_interval": model_update_interval,
             "use_vortex_refinement": operation_mode == "alignment" or bool(getattr(self, "_force_vl_model_refresh", True)),
             "fast_spectral_crop": bool(self.fast_spectral_crop_var.get()) if hasattr(self, "fast_spectral_crop_var") else True,
+
+            # Preserves the original reconstruction shape without applying a fixed size.
+            # When True, the reconstructed object maintains the size of the processed square without additional changes.
+            "preserve_reconstruction_shape": True, 
+            "fixed_reconstruction_side": 768,
+
             "crop_radius_multiplier": 2.5,
             "minimum_crop_half_width": 48,
             "maximum_crop_side": 768,
+            
+            # Controls whether the filtered Fourier transform is included in reconstruction packets.
+            # False: optimizes real-time performance by returning only amplitude and phase (no filtered FT).
+            # True: would include filtered FT for diagnostic purposes, but reduces throughput significantly.
+            "return_filtered_ft_in_recon_packets": False,
         }
 
     def _ensure_vortex_legendre_modules(self) -> None:
@@ -1480,23 +1507,38 @@ class App(ctk.CTk):
         self._vl_median_filter = median_filter
         self._vl_modules_ready = True
 
+
     def _compute_vortex_legendre_arrays(self, gray: np.ndarray, *, settings: dict, first: bool) -> dict:
         """
         Reconstruct one holographic frame using a cached Vortex carrier model.
 
-        The Fourier transform is computed from the native hologram. During alignment, the +1 order is detected and optionally refined with the vortex criterion. During acquisition, the cached spectral crop and mask are reused so the frame update reduces to FFT, cropped inverse FFT, and display conversion.
+        The Fourier transform is computed from the native hologram. During
+        alignment, the +1 order is detected and optionally refined with the
+        vortex criterion. During acquisition, the cached fixed spectral crop and
+        mask are reused so the high-throughput path remains: FFT, fixed-size
+        cropped inverse FFT, and display conversion.
         """
         self._ensure_vortex_legendre_modules()
 
         holo_u8 = self._normalize_to_uint8(gray)
         sample, crop_info = self._prepare_vl_processing_frame(gray, max_side=settings.get("max_reconstruction_side", None))
         refresh_model = self._vl_should_refresh_model(sample, settings, first)
+        return_ft_packet = bool(settings.get("return_filtered_ft_in_recon_packets", False))
 
         if refresh_model:
-            obj_field, ft_filtered, ft_unfiltered = self._vl_build_model_and_object_field(sample, settings=settings, crop_info=crop_info)
+            obj_field, ft_filtered, ft_unfiltered = self._vl_build_model_and_object_field(
+                sample,
+                settings=settings,
+                crop_info=crop_info,
+                return_full_filtered_ft=return_ft_packet,
+            )
 
             if settings.get("apply_legendre", False):
-                recon_field, phase_offset = self._vl_estimate_legendre_phase_offset(obj_field, remove_piston=settings.get("remove_piston", True), use_pca=settings.get("use_pca", False))
+                recon_field, phase_offset = self._vl_estimate_legendre_phase_offset(
+                    obj_field,
+                    remove_piston=settings.get("remove_piston", True),
+                    use_pca=settings.get("use_pca", False),
+                )
                 self._vl_model["phase_offset"] = phase_offset
                 self._vl_model["phase_correction"] = np.exp(1j * phase_offset).astype(np.complex64, copy=False)
             else:
@@ -1506,7 +1548,10 @@ class App(ctk.CTk):
 
             self._force_vl_model_refresh = False
         else:
-            obj_field, ft_filtered, ft_unfiltered = self._vl_apply_cached_model(sample)
+            obj_field, ft_filtered, ft_unfiltered = self._vl_apply_cached_model(
+                sample,
+                return_full_filtered_ft=return_ft_packet,
+            )
             phase_correction = None if self._vl_model is None else self._vl_model.get("phase_correction", None)
 
             if settings.get("apply_legendre", False) and phase_correction is not None and phase_correction.shape == obj_field.shape:
@@ -1517,12 +1562,18 @@ class App(ctk.CTk):
         self._vl_frame_counter += 1
         self._vl_last_valid_field = recon_field
 
-        ft_u8 = self._vl_log_display(ft_filtered)
-        ft_unfiltered_u8 = self._vl_log_display(ft_unfiltered)
+        ft_u8 = self._vl_log_display(ft_filtered) if ft_filtered is not None else None
+        ft_unfiltered_u8 = self._vl_log_display(ft_unfiltered) if return_ft_packet and ft_unfiltered is not None else None
         amp_u8 = self._normalize_to_uint8(np.abs(recon_field))
         phase_u8 = self._phase_to_uint8(np.angle(recon_field))
 
-        return {"holo": holo_u8, "ft": ft_u8, "ft_unfiltered": ft_unfiltered_u8, "amp": amp_u8, "phase": phase_u8}
+        return {
+            "holo": holo_u8,
+            "ft": ft_u8,
+            "ft_unfiltered": ft_unfiltered_u8,
+            "amp": amp_u8,
+            "phase": phase_u8,
+        }
 
     def _prepare_vl_processing_frame(self, image: np.ndarray, max_side: int | None = None) -> tuple[np.ndarray, dict]:
         """Prepare the numerical reconstruction field."""
@@ -1591,11 +1642,15 @@ class App(ctk.CTk):
         return filtered_ft, ft_raw, float(fx_peak), float(fy_peak), order_mask, float(radius)
 
 
+
     def _vl_should_refresh_model(self, sample: np.ndarray, settings: dict, first: bool) -> bool:
         """
         Decide whether the Fourier-order model must be recomputed.
 
-        Acquisition mode refreshes only on the first frame, parameter changes, geometry changes, filter changes, or explicit user request. Alignment mode additionally refreshes at a controlled interval so carrier drift can be followed without forcing a heavy vortex search on every frame.
+        Acquisition mode refreshes only on the first frame, parameter changes,
+        geometry changes, filter changes, or explicit user request. Alignment
+        mode additionally refreshes at a controlled interval so carrier drift can
+        be followed without forcing a heavy vortex search on every frame.
         """
         if first or self._vl_model is None:
             return True
@@ -1607,6 +1662,14 @@ class App(ctk.CTk):
             return True
 
         if self._vl_model.get("filter_type", None) != settings.get("filter_type", "Circular"):
+            return True
+
+        if bool(self._vl_model.get("preserve_reconstruction_shape", True)) != bool(settings.get("preserve_reconstruction_shape", True)):
+            return True
+
+        model_fixed_side = self._vl_model.get("fixed_reconstruction_side", None)
+        settings_fixed_side = settings.get("fixed_reconstruction_side", None)
+        if model_fixed_side != settings_fixed_side:
             return True
 
         if abs(float(self._vl_model.get("lambda_um", self.lambda_um)) - float(self.lambda_um)) > 1e-15:
@@ -1625,11 +1688,181 @@ class App(ctk.CTk):
         return False
 
 
-    def _vl_build_model_and_object_field(self, sample: np.ndarray, *, settings: dict, crop_info: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _vl_get_reconstruction_side(self, settings: dict, sample_shape: tuple[int, int], radius: float | None = None) -> int:
+        """
+        Return the fixed square side used by the optimized Vortex reconstruction.
+
+        DHM_RT_29 was fast because the inverse FFT was performed on a compact
+        Fourier crop, but that crop changed size when the diffraction order moved.
+        The full-size DHM_RT fix made the output stable by using the native square
+        grid, but that also made the inverse FFT much heavier.
+
+        This hybrid keeps a fixed fast grid: normally 768 x 768, automatically
+        enlarged only if the detected Fourier mask would not fit. That preserves
+        a stable square output without cutting the selected order.
+        """
+        sample_side = int(min(sample_shape[:2]))
+        if sample_side % 2 != 0:
+            sample_side -= 1
+        sample_side = max(sample_side, 2)
+
+        if bool(settings.get("preserve_reconstruction_shape", False)):
+            return sample_side
+
+        minimum_half_width = int(settings.get("minimum_crop_half_width", 48))
+        crop_radius_multiplier = float(settings.get("crop_radius_multiplier", 2.5))
+
+        required_half_width = minimum_half_width
+        if radius is not None and np.isfinite(radius):
+            required_half_width = max(required_half_width, int(np.ceil(float(radius) * crop_radius_multiplier)))
+
+        required_side = max(2 * required_half_width, 2)
+
+        requested = settings.get("fixed_reconstruction_side", settings.get("maximum_crop_side", 768))
+        try:
+            side = int(requested)
+        except Exception:
+            side = int(settings.get("maximum_crop_side", 768))
+
+        if side <= 0:
+            side = int(settings.get("maximum_crop_side", 768))
+
+        # Never choose a side smaller than the mask support. If this happens,
+        # speed is sacrificed only as much as needed to avoid cutting the FT order.
+        side = max(side, required_side)
+        side = min(side, sample_side)
+
+        if side % 2 != 0:
+            side -= 1
+
+        return max(side, 2)
+
+    def _vl_make_centered_order_crop(
+        self,
+        ft_raw: np.ndarray,
+        fxm: float,
+        fym: float,
+        radius: float,
+        filter_type: str,
+        crop_side: int,
+    ) -> tuple[np.ndarray, np.ndarray, dict]:
+        """
+        Build a fixed-size Fourier crop centered on the detected diffraction order.
+
+        The crop is always crop_side x crop_side. If the requested crop extends
+        outside the Fourier image, the missing region is zero-padded instead of
+        shrinking the crop. This is the key fix: the inverse FFT always receives
+        an array with the same shape, so amplitude and phase keep a stable size.
+        """
+        ft_raw = np.asarray(ft_raw)
+        height, width = ft_raw.shape[:2]
+        crop_side = int(crop_side)
+        if crop_side % 2 != 0:
+            crop_side -= 1
+        crop_side = max(crop_side, 2)
+
+        cy = int(round(float(fym)))
+        cx = int(round(float(fxm)))
+        half = crop_side // 2
+
+        start_y = cy - half
+        start_x = cx - half
+        end_y = start_y + crop_side
+        end_x = start_x + crop_side
+
+        src_y1 = max(start_y, 0)
+        src_y2 = min(end_y, height)
+        src_x1 = max(start_x, 0)
+        src_x2 = min(end_x, width)
+
+        dst_y1 = src_y1 - start_y
+        dst_y2 = dst_y1 + max(src_y2 - src_y1, 0)
+        dst_x1 = src_x1 - start_x
+        dst_x2 = dst_x1 + max(src_x2 - src_x1, 0)
+
+        ft_crop = np.zeros((crop_side, crop_side), dtype=ft_raw.dtype)
+        if src_y2 > src_y1 and src_x2 > src_x1:
+            ft_crop[dst_y1:dst_y2, dst_x1:dst_x2] = ft_raw[src_y1:src_y2, src_x1:src_x2]
+
+        yy = (start_y + np.arange(crop_side, dtype=np.float32))[:, None]
+        xx = (start_x + np.arange(crop_side, dtype=np.float32))[None, :]
+
+        if filter_type == "Rectangular":
+            mask_crop = ((np.abs(yy - float(fym)) <= float(radius)) & (np.abs(xx - float(fxm)) <= float(radius))).astype(np.float32)
+        else:
+            mask_crop = (((yy - float(fym)) ** 2 + (xx - float(fxm)) ** 2) <= float(radius) ** 2).astype(np.float32)
+
+        ft_crop = ft_crop * mask_crop
+        crop_model = {
+            "crop_side": crop_side,
+            "start_y": int(start_y),
+            "start_x": int(start_x),
+            "source_bounds": (int(src_y1), int(src_y2), int(src_x1), int(src_x2)),
+            "dest_bounds": (int(dst_y1), int(dst_y2), int(dst_x1), int(dst_x2)),
+        }
+        return ft_crop, mask_crop, crop_model
+
+    def _vl_apply_crop_model_to_ft(self, ft_raw: np.ndarray, crop_model: dict, mask_crop: np.ndarray) -> np.ndarray:
+        """
+        Apply the cached fixed-size spectral crop model to a new Fourier frame.
+        """
+        crop_side = int(crop_model.get("crop_side", mask_crop.shape[0]))
+        ft_crop = np.zeros((crop_side, crop_side), dtype=ft_raw.dtype)
+
+        src_y1, src_y2, src_x1, src_x2 = crop_model["source_bounds"]
+        dst_y1, dst_y2, dst_x1, dst_x2 = crop_model["dest_bounds"]
+
+        height, width = ft_raw.shape[:2]
+        src_y1 = max(0, min(int(src_y1), height))
+        src_y2 = max(0, min(int(src_y2), height))
+        src_x1 = max(0, min(int(src_x1), width))
+        src_x2 = max(0, min(int(src_x2), width))
+
+        if src_y2 > src_y1 and src_x2 > src_x1:
+            ft_crop[dst_y1:dst_y2, dst_x1:dst_x2] = ft_raw[src_y1:src_y2, src_x1:src_x2]
+
+        return ft_crop * mask_crop
+
+    def _vl_expand_crop_to_full_spectrum(self, ft_raw: np.ndarray, crop_model: dict, mask_crop: np.ndarray) -> np.ndarray:
+        """
+        Place the cached crop mask back into the native Fourier grid for display.
+
+        This keeps the left Fourier viewer full-size even when the reconstruction
+        is computed from a centered crop.
+        """
+        ft_filtered_full = np.zeros_like(ft_raw)
+        src_y1, src_y2, src_x1, src_x2 = crop_model["source_bounds"]
+        dst_y1, dst_y2, dst_x1, dst_x2 = crop_model["dest_bounds"]
+
+        height, width = ft_raw.shape[:2]
+        src_y1 = max(0, min(int(src_y1), height))
+        src_y2 = max(0, min(int(src_y2), height))
+        src_x1 = max(0, min(int(src_x1), width))
+        src_x2 = max(0, min(int(src_x2), width))
+
+        if src_y2 > src_y1 and src_x2 > src_x1:
+            local_mask = mask_crop[dst_y1:dst_y2, dst_x1:dst_x2]
+            ft_filtered_full[src_y1:src_y2, src_x1:src_x2] = ft_raw[src_y1:src_y2, src_x1:src_x2] * local_mask
+
+        return ft_filtered_full
+
+
+    def _vl_build_model_and_object_field(
+        self,
+        sample: np.ndarray,
+        *,
+        settings: dict,
+        crop_info: dict,
+        return_full_filtered_ft: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray]:
         """
         Estimate and cache the off-axis carrier model.
 
-        The model is built from the native Fourier lattice. A vortex-refined carrier coordinate is estimated during alignment, a compact spectral support is extracted around that order, and the resulting crop is reused during acquisition. This keeps the correct Fourier geometry while avoiding a full-frame inverse FFT in the high-throughput path.
+        The model is built from the native Fourier lattice. A vortex-refined
+        carrier coordinate is estimated during alignment, a fixed-size spectral
+        support is extracted around that order, and the resulting crop model is
+        reused during acquisition. This keeps the correct Fourier geometry while
+        avoiding a full-frame inverse FFT in the high-throughput path.
         """
         VL = self._VL
         fft2 = self._vl_fft2
@@ -1645,7 +1878,14 @@ class App(ctk.CTk):
         rotate = bool(settings.get("rotate", False))
         filter_type = settings.get("filter_type", "Circular")
 
-        ft_raw, holo_filtered_full, fxm, fym, circular_mask = VL.spatial_filter(sample, M, N, save="No", factor=factor, rotate=rotate)
+        ft_raw, holo_filtered_full, fxm, fym, circular_mask = VL.spatial_filter(
+            sample,
+            M,
+            N,
+            save="No",
+            factor=factor,
+            rotate=rotate,
+        )
 
         distance = float(np.hypot(float(fxm) - fx_0, float(fym) - fy_0))
         radius = distance / factor if distance > 1e-9 else max(10.0, 0.08 * min(N, M))
@@ -1666,36 +1906,23 @@ class App(ctk.CTk):
                     print(f"[Vortex] Refinement skipped: {exc}")
 
         if settings.get("fast_spectral_crop", True):
-            half_width = int(np.ceil(radius * float(settings.get("crop_radius_multiplier", 2.5))))
-            half_width = max(half_width, int(settings.get("minimum_crop_half_width", 48)))
-            maximum_crop_side = int(settings.get("maximum_crop_side", 768))
-            if maximum_crop_side > 0:
-                half_width = min(half_width, max(maximum_crop_side // 2, 16))
-            cx = int(round(float(fxm)))
-            cy = int(round(float(fym)))
-            y1 = max(cy - half_width, 0)
-            y2 = min(cy + half_width, N)
-            x1 = max(cx - half_width, 0)
-            x2 = min(cx + half_width, M)
-
-            if (y2 - y1) % 2 != 0:
-                y2 = max(y1 + 2, y2 - 1)
-            if (x2 - x1) % 2 != 0:
-                x2 = max(x1 + 2, x2 - 1)
-
-            yy, xx = np.ogrid[y1:y2, x1:x2]
-            if filter_type == "Rectangular":
-                mask_crop = np.ones((y2 - y1, x2 - x1), dtype=np.float32)
-            else:
-                mask_crop = (((yy - float(fym)) ** 2 + (xx - float(fxm)) ** 2) <= radius ** 2).astype(np.float32)
-
-            ft_crop = ft_raw[y1:y2, x1:x2] * mask_crop
+            crop_side = self._vl_get_reconstruction_side(settings, sample.shape, radius=radius)
+            ft_crop, mask_crop, crop_model = self._vl_make_centered_order_crop(
+                ft_raw,
+                fxm,
+                fym,
+                radius,
+                filter_type,
+                crop_side,
+            )
             obj_field = fftshift(ifft2(ifftshift(ft_crop))).astype(np.complex64, copy=False)
-            ft_filtered_display = ft_crop
-            bbox = (y1, y2, x1, x2)
+            ft_filtered_display = self._vl_expand_crop_to_full_spectrum(ft_raw, crop_model, mask_crop) if return_full_filtered_ft else None
+            bbox = crop_model["source_bounds"]
             ref_wave = None
             mask = None
         else:
+            crop_side = None
+            crop_model = None
             if filter_type == "Rectangular":
                 mask = self.rectangularMask(N, M, radius, int(round(fym)), int(round(fxm))).astype(np.float32)
             else:
@@ -1704,9 +1931,22 @@ class App(ctk.CTk):
             ft_filtered_full = ft_raw * mask
             holo_filtered = fftshift(ifft2(ifftshift(ft_filtered_full)))
             m_grid, n_grid = np.meshgrid(np.arange(-M // 2, M // 2), np.arange(-N // 2, N // 2))
-            ref_wave = VL.reference_wave(fxm, fym, m_grid, n_grid, self.lambda_um, float(crop_info["dx_eff"]), self.k, fx_0, fy_0, M, N, dy=float(crop_info["dy_eff"])).astype(np.complex64, copy=False)
+            ref_wave = VL.reference_wave(
+                fxm,
+                fym,
+                m_grid,
+                n_grid,
+                self.lambda_um,
+                float(crop_info["dx_eff"]),
+                self.k,
+                fx_0,
+                fy_0,
+                M,
+                N,
+                dy=float(crop_info["dy_eff"]),
+            ).astype(np.complex64, copy=False)
             obj_field = (holo_filtered * ref_wave).astype(np.complex64, copy=False)
-            ft_filtered_display = ft_filtered_full
+            ft_filtered_display = ft_filtered_full if return_full_filtered_ft else None
             bbox = None
             mask_crop = None
 
@@ -1718,6 +1958,8 @@ class App(ctk.CTk):
             "mask": mask,
             "mask_crop": mask_crop,
             "bbox": bbox,
+            "crop_model": crop_model,
+            "crop_side": crop_side,
             "ref_wave": ref_wave,
             "fxm": float(fxm),
             "fym": float(fym),
@@ -1731,12 +1973,14 @@ class App(ctk.CTk):
             "dx_um": float(self.dx_um),
             "dy_um": float(self.dy_um),
             "fast_spectral_crop": bool(settings.get("fast_spectral_crop", True)),
+            "preserve_reconstruction_shape": bool(settings.get("preserve_reconstruction_shape", False)),
+            "fixed_reconstruction_side": settings.get("fixed_reconstruction_side", None),
         }
 
         return obj_field, ft_filtered_display, ft_raw
 
 
-    def _vl_apply_cached_model(self, sample: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _vl_apply_cached_model(self, sample: np.ndarray, return_full_filtered_ft: bool = False) -> tuple[np.ndarray, np.ndarray | None, np.ndarray]:
         """Reconstruct one frame using the cached Fourier mask and carrier model."""
         fft2 = self._vl_fft2
         ifft2 = self._vl_ifft2
@@ -1746,19 +1990,19 @@ class App(ctk.CTk):
         sample = np.asarray(sample, dtype=np.float32)
         ft_raw = fftshift(fft2(fftshift(sample)))
 
-        if self._vl_model.get("fast_spectral_crop", True) and self._vl_model.get("bbox", None) is not None:
-            y1, y2, x1, x2 = self._vl_model["bbox"]
+        if self._vl_model.get("fast_spectral_crop", True) and self._vl_model.get("crop_model", None) is not None:
             mask_crop = self._vl_model["mask_crop"]
-            ft_crop = ft_raw[y1:y2, x1:x2] * mask_crop
+            crop_model = self._vl_model["crop_model"]
+            ft_crop = self._vl_apply_crop_model_to_ft(ft_raw, crop_model, mask_crop)
             obj_field = fftshift(ifft2(ifftshift(ft_crop))).astype(np.complex64, copy=False)
-            return obj_field, ft_crop, ft_raw
+            ft_filtered_full = self._vl_expand_crop_to_full_spectrum(ft_raw, crop_model, mask_crop) if return_full_filtered_ft else None
+            return obj_field, ft_filtered_full, ft_raw
 
         ft_filtered = ft_raw * self._vl_model["mask"]
         holo_filtered = fftshift(ifft2(ifftshift(ft_filtered)))
         obj_field = (holo_filtered * self._vl_model["ref_wave"]).astype(np.complex64, copy=False)
 
-        return obj_field, ft_filtered, ft_raw
-
+        return obj_field, ft_filtered if return_full_filtered_ft else None, ft_raw
 
     def _vl_estimate_legendre_phase_offset(self, field: np.ndarray, *, remove_piston: bool = True, use_pca: bool = True) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -2038,7 +2282,7 @@ class App(ctk.CTk):
             self._put_comp_packet(packet)
 
             with self._latest_recon_lock:
-                self._latest_recon_frame = gray.copy()
+                self._latest_recon_frame = gray
                 self._latest_recon_index = frame_index
 
             frame_index += 1
@@ -2054,7 +2298,7 @@ class App(ctk.CTk):
 
         while not self._stop_compensation.is_set():
             with self._latest_recon_lock:
-                frame = None if self._latest_recon_frame is None else self._latest_recon_frame.copy()
+                frame = self._latest_recon_frame
                 frame_index = self._latest_recon_index
 
             if frame is None or frame_index <= self._processed_recon_index:
@@ -2201,26 +2445,34 @@ class App(ctk.CTk):
 
         self._mark_hologram_frame_displayed()
 
+
     def _apply_reconstruction_packet(self, data: dict) -> None:
         """
         Apply a reconstruction packet to the right viewer and update the filtered
-        Fourier cache used by the left viewer.
+        Fourier cache only when the reconstruction worker actually sent one.
+
+        In the hybrid fast mode, the reconstruction thread skips full filtered-FT
+        packet generation. If the user switches to the Fourier viewer, the full
+        filtered FT is recomputed on demand from the current native hologram.
         """
         self.current_amplitude_array = data["amp"]
         self.current_phase_array = data["phase"]
-        self.current_ft_filtered_array = data["ft"]
-        self.current_reconstruction_ft_array = data["ft"]
 
-        ft_tk = self._preserve_aspect_ratio(
-            Image.fromarray(data["ft"]),
-            self.viewbox_width,
-            self.viewbox_height,
-        )
+        ft_arr = data.get("ft", None)
+        if ft_arr is not None:
+            self.current_ft_filtered_array = ft_arr
+            self.current_reconstruction_ft_array = ft_arr
+
+            ft_tk = self._preserve_aspect_ratio(
+                Image.fromarray(ft_arr),
+                self.viewbox_width,
+                self.viewbox_height,
+            )
+            self.current_ft_filtered_tk = ft_tk
+            self.current_reconstruction_ft_tk = ft_tk
+
         amp_tk = self._preserve_aspect_ratio_right(Image.fromarray(data["amp"]))
         pha_tk = self._preserve_aspect_ratio_right(Image.fromarray(data["phase"]))
-
-        self.current_ft_filtered_tk = ft_tk
-        self.current_reconstruction_ft_tk = ft_tk
 
         self.amplitude_frames = [amp_tk]
         self.phase_frames = [pha_tk]
@@ -2245,7 +2497,6 @@ class App(ctk.CTk):
                 self.buff_phase.append(data["phase"].copy())
 
         self._mark_reconstruction_frame_displayed()
-
 
     def start_compensation(self) -> None:
         """Start the real-time reconstruction engine."""
@@ -2404,7 +2655,7 @@ class App(ctk.CTk):
 
     def _show_amp_mode_menu(self):
         menu = tk.Menu(self, tearoff=0)
-        opts = ["Amplitude", "Intensities"]
+        opts = ["Amplitude"]
         for opt in opts:
             menu.add_radiobutton(
                 label=opt, value=opt,
@@ -2750,22 +3001,19 @@ class App(ctk.CTk):
         return ImageTk.PhotoImage(canvas)
 
     def _preserve_aspect_ratio_right(self, pil_image: Image.Image) -> ImageTk.PhotoImage:
-        max_width, max_height = self.viewbox_width, self.viewbox_height
-        original_w, original_h = pil_image.size
+        """
+        Display amplitude and phase in a fixed-size viewer canvas.
 
-        #  If smaller or equal, no upscaling (unless you want to allow it).
-        if original_w <= max_width and original_h <= max_height:
-            resized = pil_image
-        else:
-            # We shrink to keep the aspect ratio correct
-            ratio_w = max_width / float(original_w)
-            ratio_h = max_height / float(original_h)
-            scale_factor = min(ratio_w, ratio_h)
-            new_w = int(original_w * scale_factor)
-            new_h = int(original_h * scale_factor)
-            resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-        return ImageTk.PhotoImage(resized)
+        The previous version returned the raw image when it was smaller than the
+        panel, so a reconstruction computed from a smaller spectral crop looked
+        physically smaller on screen. This wrapper always uses the same canvas
+        size as the left viewer, preserving aspect ratio and centering the image.
+        """
+        return self._preserve_aspect_ratio(
+            pil_image,
+            self.viewbox_width,
+            self.viewbox_height,
+        )
 
     def previous_hologram_view(self):
         # Store current UI filter settings for the current hologram/FT index
@@ -4584,5 +4832,6 @@ class App(ctk.CTk):
     def release(self):
         os.system("taskkill /f /im python.exe")
  
-if __name__=='__main__':
+if __name__ == "__main__":
     app = App()
+    app.mainloop()
