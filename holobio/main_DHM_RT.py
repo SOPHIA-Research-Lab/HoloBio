@@ -1,17 +1,17 @@
 import zipfile, io
 import customtkinter as ctk
-from parallel_rc import *
+from holobio.parallel_rc import *
 from PIL import ImageTk, Image
 from tkinter import filedialog, messagebox
 import math
 import cv2, os, time, tkinter as tk
 from importlib import import_module, reload
-import functions_GUI as fGUI
+from holobio import functions_GUI as fGUI
 import threading, queue
 from pandastable.core import Table
 import pandas as pd
 import re
-from track_particles_kalman import track_particles_kalman as track
+from holobio.track_particles_kalman import track_particles_kalman as track
 from scipy.ndimage import median_filter
 
 import numpy as np

@@ -1,5 +1,11 @@
-
+import os
+import sys
 import customtkinter as ctk
+
+_package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _package_root not in sys.path:
+    sys.path.insert(0, _package_root)
+
 
 # Set appearance mode and theme
 ctk.set_appearance_mode("light")
